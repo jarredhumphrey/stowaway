@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "Stowaway Example",
+    "slug": "stowaway-example",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "newArchEnabled": true,
+    "ios": {
+      "bundleIdentifier": "com.stowaway.example",
+      "supportsTablet": false
+    },
+    "android": {
+      "package": "com.stowaway.example"
+    }
+  }
+}
