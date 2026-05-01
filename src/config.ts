@@ -6,6 +6,7 @@ export interface E2EConfig {
   defaultTimeout: number;
   pollInterval: number;
   suiteName?: string;
+  verbose: boolean;
 }
 
 export function loadConfig(): E2EConfig {
@@ -23,6 +24,11 @@ export function loadConfig(): E2EConfig {
     );
   }
 
+  const verbose =
+    process.argv.includes('--verbose') ||
+    process.env.VERBOSE === '1' ||
+    process.env.VERBOSE === 'true';
+
   return {
     platform,
     metroPort: Number(process.env.METRO_PORT ?? 8081),
@@ -31,5 +37,6 @@ export function loadConfig(): E2EConfig {
     defaultTimeout: Number(process.env.DEFAULT_TIMEOUT ?? 10_000),
     pollInterval: 250,
     suiteName: process.env.SUITE_NAME,
+    verbose,
   };
 }

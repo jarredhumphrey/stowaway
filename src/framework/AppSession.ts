@@ -13,6 +13,16 @@ import {
 
 export type { Selector };
 
+function selectorStep(sel: Selector): string {
+  if ('testID' in sel) return sel.testID;
+  if ('text' in sel) return typeof sel.text === 'string' ? `"${sel.text}"` : sel.text.toString();
+  if ('component' in sel) return sel.component;
+  if ('accessibilityLabel' in sel) return `a11y:"${sel.accessibilityLabel}"`;
+  if ('accessibilityRole' in sel) return `role:${sel.accessibilityRole}`;
+  if ('placeholder' in sel) return `placeholder:"${sel.placeholder}"`;
+  return JSON.stringify(sel);
+}
+
 export type NetworkMatcher = {
   url: string | RegExp;
   method?: string;
@@ -142,6 +152,10 @@ export class AppSession {
   // Called by TestRunner after afterAll hooks
   clearSuiteMocks(): void { this.suiteMocks = []; }
 
+  private step(msg: string): void {
+    if (this.config.verbose) console.log(`        ${msg}`);
+  }
+
   // ── Queries ──────────────────────────────────────────────────────────────────
 
   async find(selector: Selector): Promise<Element> {
@@ -150,13 +164,15 @@ export class AppSession {
     if (!descriptor) {
       throw new Error(`find() — element not found: ${JSON.stringify(selector)}`);
     }
-    return new Element(descriptor, this.hermes);
+    this.step(`find: ${selectorStep(selector)}`);
+    return new Element(descriptor, this.hermes, this.config.verbose);
   }
 
   async findAll(selector: Selector): Promise<Element[]> {
     const expr = selectorToAllExpression(selector);
     const descriptors = await this.hermes.evaluate<NodeDescriptor[]>(expr);
-    return descriptors.map(d => new Element(d, this.hermes));
+    this.step(`findAll: ${selectorStep(selector)} (${descriptors.length} found)`);
+    return descriptors.map(d => new Element(d, this.hermes, this.config.verbose));
   }
 
   async waitForElement(
@@ -169,13 +185,16 @@ export class AppSession {
     const timeout = opts?.timeout ?? this.config.defaultTimeout;
     const interval = opts?.interval ?? this.config.pollInterval;
     const deadline = Date.now() + timeout;
+    // Inline the evaluate so the internal polling never triggers find()'s step log.
+    const expr = selectorToExpression(selector);
 
     while (Date.now() < deadline) {
-      try {
-        return await this.find(selector);
-      } catch {
-        await sleep(interval);
+      const descriptor = await this.hermes.evaluate<NodeDescriptor | null>(expr);
+      if (descriptor) {
+        this.step(`waitFor: ${selectorStep(selector)}`);
+        return new Element(descriptor, this.hermes, this.config.verbose);
       }
+      await sleep(interval);
     }
     throw new Error(
       `waitForElement(${JSON.stringify(selectorOrTestID)}) timed out after ${timeout}ms`,
@@ -213,11 +232,19 @@ export class AppSession {
   async scrollAndFind(testID: string, opts?: { timeout?: number }): Promise<Element> {
     const timeout = opts?.timeout ?? this.config.defaultTimeout;
     const deadline = Date.now() + timeout;
+    // Inline the evaluate so internal retries don't trigger find()'s step log.
+    const expr = selectorToExpression({ testID });
 
-    // Check if already in the initial render batch before scrolling.
-    try {
-      return await this.find({ testID });
-    } catch { /* not visible yet, need to scroll */ }
+    const tryFind = async (): Promise<Element | null> => {
+      const descriptor = await this.hermes.evaluate<NodeDescriptor | null>(expr);
+      return descriptor ? new Element(descriptor, this.hermes, this.config.verbose) : null;
+    };
+
+    const initial = await tryFind();
+    if (initial) {
+      this.step(`scrollAndFind: ${testID}`);
+      return initial;
+    }
 
     const SCROLL_STEP = 5_000;
     let scrollOffset = SCROLL_STEP;
@@ -225,14 +252,14 @@ export class AppSession {
     while (Date.now() < deadline) {
       await this.hermes.evaluate<boolean>(`__testBridge__.scrollToOffset(${scrollOffset})`);
 
-      // Poll until the element appears or we exhaust 1.5 s at this scroll position.
       const pollDeadline = Math.min(Date.now() + 1_500, deadline);
       while (Date.now() < pollDeadline) {
-        try {
-          return await this.find({ testID });
-        } catch {
-          await sleep(this.config.pollInterval);
+        const el = await tryFind();
+        if (el) {
+          this.step(`scrollAndFind: ${testID}`);
+          return el;
         }
+        await sleep(this.config.pollInterval);
       }
 
       scrollOffset += SCROLL_STEP;
@@ -250,17 +277,26 @@ export class AppSession {
     const timeout = opts?.timeout ?? this.config.defaultTimeout;
     const interval = opts?.interval ?? this.config.pollInterval;
     const deadline = Date.now() + timeout;
+    // Inline the evaluate so internal checks don't trigger find()'s step log.
+    const expr = 'testID' in selector
+      ? null
+      : selectorToExpression(selector);
 
     while (Date.now() < deadline) {
       if ('testID' in selector) {
         const gone = await this.hermes.evaluate<boolean>(
           `!__testBridge__.exists(${JSON.stringify(selector.testID)})`,
         );
-        if (gone) return;
+        if (gone) {
+          this.step(`waitForGone: ${selectorStep(selector)}`);
+          return;
+        }
       } else {
-        let found = false;
-        try { await this.find(selector); found = true; } catch { /* disappeared */ }
-        if (!found) return;
+        const descriptor = await this.hermes.evaluate<NodeDescriptor | null>(expr!);
+        if (!descriptor) {
+          this.step(`waitForGone: ${selectorStep(selector)}`);
+          return;
+        }
       }
       await sleep(interval);
     }

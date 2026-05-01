@@ -51,6 +51,7 @@ All configuration is read from environment variables:
 | `DEFAULT_TIMEOUT` | `10000` | Element wait timeout (ms) |
 | `TEST_RESULTS_DIR` | `test-results` | JSON results output directory |
 | `SUITE_NAME` | — | Label printed in the run header |
+| `VERBOSE` | — | `1` or `true` — prints each step as it runs; also enabled by `--verbose` CLI flag |
 
 ```ts
 import { loadConfig } from 'stowaway';
@@ -80,66 +81,130 @@ The `app` parameter passed to each test is an `AppSession`. The app is reset (te
 
 ### 3. Run entry point
 
+Pass a directory path and `TestRunner` auto-discovers all `*.spec.ts` files inside it:
+
 ```ts
-import * as fs from 'fs';
-import * as path from 'path';
 import { TestRunner, loadConfig } from 'stowaway';
 
-const specsDir = path.join(__dirname, 'specs');
-const specFiles = fs.readdirSync(specsDir)
-  .filter(f => f.endsWith('.spec.ts'))
-  .map(f => path.join(specsDir, f));
-
 const runner = new TestRunner(loadConfig());
-await runner.run(specFiles);
+runner.run(__dirname); // finds every *.spec.ts in the same directory
+```
+
+Or pass an explicit ordered array:
+
+```ts
+runner.run([
+  path.resolve(__dirname, 'auth.spec.ts'),
+  path.resolve(__dirname, 'home.spec.ts'),
+]);
 ```
 
 ---
 
 ## API
 
-### `AppSession`
+### `AppSession` queries
 
 | Method | Description |
 |--------|-------------|
-| `waitForElement(testID, opts?)` | Poll until an element with the given `testID` is in the fiber tree |
-| `scrollAndFind(testID, opts?)` | Scroll a FlatList/ScrollView until the element appears |
-| `find(selector)` | Find one element immediately (throws if not found) |
-| `findAll(selector)` | Find all matching elements |
-| `waitFor(fn, opts?)` | Poll until an arbitrary async predicate returns `true` |
-| `screenshot(name)` | Capture a screenshot to `testResultsDir` |
+| `find(selector)` | First match — throws immediately if not found |
+| `findAll(selector)` | All matches — empty array if none |
+| `findNth(selector, n)` | nth match (0-based) from `findAll` — throws if out of range |
+| `waitForElement(selector \| testID, opts?)` | Polls until the element appears; string arg treated as `{ testID }` |
+| `waitForElementToDisappear(selector \| testID, opts?)` | Polls until the element leaves the tree |
+| `waitFor(fn, opts?)` | Polls an arbitrary `() => Promise<boolean>` |
+| `scrollAndFind(testID, opts?)` | Scrolls a FlatList/ScrollView in steps until the element appears |
+| `getTree(maxDepth?)` | Returns the serialized fiber tree — useful for debugging testIDs |
 
 **Selector types:**
 ```ts
 { testID: string }
 { component: string; props?: Record<string, unknown> }
-{ text: string }
+{ text: string; exact?: boolean }        // exact defaults to true
+{ text: RegExp }
+{ accessibilityLabel: string; exact?: boolean }
+{ accessibilityRole: string }
+{ placeholder: string; exact?: boolean }
 ```
+
+### `AppSession` interactions & device
+
+| Method | Description |
+|--------|-------------|
+| `screenshot(name)` | Saves `<testResultsDir>/<name>-<timestamp>.png` |
+| `dismissKeyboard()` | Blurs the first TextInput in the tree |
+| `disableAnimations()` | Patches `Animated` to zero duration — call in `beforeAll` to reduce timing flakiness |
+| `pressBack()` | Android only — sends hardware Back key |
+| `openURL(url)` | Opens a URL via the OS deep-link mechanism |
+| `setLocation(lat, lng)` | Simulates GPS location (iOS only) |
+| `setPermission(service, status)` | Grants/revokes/resets a system permission |
+| `setNetworkOffline(offline)` | When `true`, all `fetch` calls reject with a network error |
+| `mockNetwork(matcher, response)` | Intercepts matching `fetch` calls and returns a controlled response |
+| `networkRequests()` | Returns all intercepted requests since the last app launch |
+| `clearNetworkMocks()` | Wipes all mocks and the request log |
+| `setStorage(key, value)` | Writes a string to AsyncStorage |
+| `getStorage(key)` | Reads a string from AsyncStorage (`null` if absent) |
+| `removeStorage(key)` | Deletes a key from AsyncStorage |
+| `clearStorage()` | Clears all AsyncStorage keys |
 
 ### `Element`
 
 | Method | Description |
 |--------|-------------|
-| `tap()` | Calls the nearest `onPress` up the fiber tree |
-| `text()` | Returns concatenated text from all descendant HostText fibers |
-| `exists()` | Re-queries by testID; returns `false` if not found |
-| `props()` | Returns serializable (non-function) `memoizedProps` |
+| `tap()` | Nearest ancestor `onPress` |
+| `longPress()` | Nearest ancestor `onLongPress` |
+| `doubleTap()` | `onDoublePress`/`onDoubleTap` if found, otherwise `onPress` twice |
+| `typeText(text)` | Calls `onChangeText` |
+| `clearText()` | `typeText('')` |
+| `pressKey(key)` | Fires `onKeyPress({ nativeEvent: { key } })` — e.g. `'Enter'`, `'Backspace'` |
+| `focus()` / `blur()` | Calls `onFocus`/`onBlur` or `stateNode.focus()`/`blur()` |
+| `submitEditing()` | Calls `onSubmitEditing` |
+| `check()` / `uncheck()` | Calls `onValueChange(true/false)` — for Switch and custom toggles |
+| `selectOption(value)` | Calls `onValueChange(value)` — for pickers and segmented controls |
+| `swipe(direction, distance?)` | Fires a PanResponder gesture sequence |
+| `dragTo(target)` | Measures both elements and fires a PanResponder drag |
+| `scrollTo(offset)` | Scrolls the element vertically to the given px offset |
+| `scrollToX(offset)` | Scrolls the element horizontally to the given px offset |
+| `text()` | Concatenated HostText descendants |
+| `inputValue()` | `memoizedProps.value ?? defaultValue ?? ''` — for TextInput |
+| `prop(name)` | Single named prop from `memoizedProps` |
+| `props()` | All serializable `memoizedProps` + `accessibilityState` |
+| `exists()` | Re-queries by testID; `false` if not found |
+| `isEnabled()` | `false` if `disabled` or `accessibilityState.disabled` |
+| `isChecked()` | `!!memoizedProps.value` — for Switch/checkbox |
+| `isVisible()` | Alias for `exists()` |
+| `isFocused()` | `true` if `accessibilityState.focused` |
+| `getFrame()` | `{ x, y, width, height }` via `stateNode.measure()` |
+| `find(selector)` | Scoped query within this element's subtree |
+| `findAll(selector)` | Scoped query — all matches within this element's subtree |
 
 ### `expect`
 
-Minimal assertion library. Throws `AssertionError` on failure.
+When passed a primitive or object, returns a **sync** `Assertion`:
 
 ```ts
-expect(value).toBe(x)
-expect(value).toEqual(x)       // JSON.stringify comparison
-expect(value).toContain(x)     // string or array
-expect(value).toBeTruthy()
-expect(value).toBeFalsy()
-expect(value).toBeNull()
-expect(value).toBeUndefined()
-expect(value).toBeGreaterThan(n)
+expect(value).toBe(x)             // Object.is
+expect(value).toEqual(x)          // JSON.stringify deep equal
+expect(value).toContain(x)        // string includes or array includes
+expect(value).toMatchObject(obj)  // partial key match
+expect(value).toBeTruthy() / toBeFalsy() / toBeNull() / toBeUndefined()
+expect(value).toBeGreaterThan(n) / toBeGreaterThanOrEqual(n)
+expect(value).toBeLessThan(n) / toBeLessThanOrEqual(n)
 expect(value).toHaveLength(n)
-expect(value).not.toBe(x)      // negation works on all matchers
+expect(props).toHaveAccessibilityLabel(label)
+expect(props).toHaveAccessibilityRole(role)
+expect(value).not.<matcher>()     // negation
+```
+
+When passed an `Element`, returns an **async auto-waiting** `AsyncElementExpect` that polls every 250 ms until the assertion passes or times out (default 4 000 ms):
+
+```ts
+await expect(element).toHaveText('Done')       // string or RegExp
+await expect(element).toHaveValue('Jane Doe')  // for inputs
+await expect(element).toBeVisible()
+await expect(element).toBeEnabled()
+await expect(element).not.toHaveText('Error')
+await expect(element).toHaveText('Done', { timeout: 8_000 })
 ```
 
 ---
@@ -149,4 +214,4 @@ expect(value).not.toBe(x)      // negation works on all matchers
 - **Node IDs are invalidated after `reset()`** — never hold an `Element` reference across test boundaries; always re-query.
 - **The bridge script is evaluated fresh each `reset()`** — any global test state inside the app is wiped.
 - **CJS build only** — currently compiles to CommonJS so it can be required by `tsx` in projects without `"type": "module"`. A dual CJS+ESM build will be needed before publishing to npm.
-- **iOS only, tested** — Android paths exist in `Device.ts` but are untested.
+- **Android requires a connected device or emulator** — run `adb reverse tcp:8081 tcp:8081` if Metro isn't reachable (the runner does this automatically on launch).

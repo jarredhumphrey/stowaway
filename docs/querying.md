@@ -10,7 +10,11 @@ Most query methods accept a `Selector` union:
 type Selector =
   | { testID: string }
   | { component: string; props?: Record<string, unknown> }
-  | { text: string }
+  | { text: string; exact?: boolean }
+  | { text: RegExp }
+  | { accessibilityLabel: string; exact?: boolean }
+  | { accessibilityRole: string }
+  | { placeholder: string; exact?: boolean }
 ```
 
 ### `{ testID: string }`
@@ -35,15 +39,43 @@ const btn = await app.find({ component: 'Button', props: { label: 'Continue' } }
 
 Component name resolution order: `fiber.type` (if string), `fiber.type.displayName`, `fiber.type.name`.
 
-### `{ text: string }`
+### `{ text: string; exact?: boolean }` and `{ text: RegExp }`
 
-Walks all `Text` fibers and matches the one whose full concatenated text content equals the given string exactly.
+Matches fibers by their full concatenated text content. `exact` defaults to `true` (strict equality). Set `exact: false` for a substring match, or pass a `RegExp` for pattern matching.
 
 ```ts
 const heading = await app.find({ text: 'Choose a plan' });
+const heading = await app.find({ text: 'plan', exact: false });   // substring
+const heading = await app.find({ text: /choose a plan/i });       // regex
 ```
 
 Use this as a last resort — it's slower than `testID` and brittle if text changes.
+
+### `{ accessibilityLabel: string; exact?: boolean }`
+
+Matches fibers by `memoizedProps.accessibilityLabel`. `exact` defaults to `true`.
+
+```ts
+const btn = await app.find({ accessibilityLabel: 'Close dialog' });
+const btn = await app.find({ accessibilityLabel: 'close', exact: false });
+```
+
+### `{ accessibilityRole: string }`
+
+Matches fibers by `memoizedProps.accessibilityRole`. HOC wrappers that pass the same role through are deduplicated automatically.
+
+```ts
+const buttons = await app.findAll({ accessibilityRole: 'button' });
+```
+
+### `{ placeholder: string; exact?: boolean }`
+
+Matches `TextInput` (and similar) fibers by `memoizedProps.placeholder`. `exact` defaults to `true`. HostComponent fibers are skipped to avoid matching native wrappers.
+
+```ts
+const input = await app.find({ placeholder: 'Enter your email' });
+const input = await app.find({ placeholder: 'email', exact: false });
+```
 
 ---
 
@@ -65,13 +97,26 @@ const chips = await app.findAll({ component: 'Chip' });
 expect(chips).toHaveLength(5);
 ```
 
-## `waitForElement(testID, opts?)`
+## `findNth(selector, n)`
 
-Polls `find({ testID })` every `pollInterval` ms (default: 250 ms) until the element appears or `timeout` ms elapses. Throws with a descriptive error on timeout.
+Returns the nth match (0-based) from `findAll`. Throws if the index is out of range.
 
 ```ts
-// Wait with default timeout (DEFAULT_TIMEOUT env var, default 10 000 ms)
+// Get the second item in a list
+const secondItem = await app.findNth({ component: 'ListItem' }, 1);
+await secondItem.tap();
+```
+
+## `waitForElement(selector | testID, opts?)`
+
+Polls until the element appears or `timeout` ms elapses. Accepts any `Selector` or a plain string (treated as `{ testID }`). Throws with a descriptive error on timeout.
+
+```ts
+// Plain string — shorthand for { testID: 'success-banner' }
 const banner = await app.waitForElement('success-banner');
+
+// Any selector works
+const banner = await app.waitForElement({ text: 'Submitted successfully!' });
 
 // Override timeout for a slower operation
 const result = await app.waitForElement('search-results', { timeout: 15_000 });
@@ -150,34 +195,56 @@ Once you have an `Element`, you can read its properties without re-querying:
 ```ts
 const input = await app.find({ testID: 'input-name' });
 
-await input.text()       // concatenated HostText descendants
-await input.props()      // serializable memoizedProps (strings, numbers, booleans, null)
-await input.isEnabled()  // false if disabled or accessibilityState.disabled
-await input.isFocused()  // true if accessibilityState.focused
-await input.isVisible()  // alias for exists()
-await input.getFrame()   // { x, y, width, height } via stateNode.measure(), or null
+await input.text()           // concatenated HostText descendants
+await input.inputValue()     // memoizedProps.value ?? defaultValue ?? '' — for TextInput
+await input.prop('value')    // single named prop — sugar over (await input.props()).value
+await input.props()          // all serializable memoizedProps (strings, numbers, booleans, null) + accessibilityState
+await input.isEnabled()      // false if disabled or accessibilityState.disabled
+await input.isChecked()      // !!memoizedProps.value — for Switch / checkbox
+await input.isFocused()      // true if accessibilityState.focused
+await input.isVisible()      // alias for exists()
+await input.getFrame()       // { x, y, width, height } via stateNode.measure(), or null
 ```
 
-`props()` always returns the current fiber state — it re-walks the tree by `testID` on every call, so it's safe to call multiple times across state changes:
+`props()` re-walks the tree by `testID` on every call, so it reflects the current fiber state after any React re-render:
 
 ```ts
 await btn.tap();
-// React state updates after tap — props() reflects the new memoizedProps
 const props = await btn.props();
 expect(props.accessibilityState?.selected).toBe(true);
+```
+
+Use `prop(name)` when you only need one field:
+
+```ts
+await input.typeText('Jane');
+expect(await input.prop('value')).toBe('Jane');
+```
+
+---
+
+## Scoped queries
+
+`Element` itself has `find` and `findAll` methods that search only within that element's subtree. Use them to avoid false matches when the same `testID` or component appears multiple times on screen.
+
+```ts
+const card = await app.find({ testID: 'product-card-1' });
+
+// Only searches within card's subtree — won't match buttons on other cards
+const addBtn = await card.find({ testID: 'btn-add-to-cart' });
+await addBtn.tap();
 ```
 
 ---
 
 ## Debugging: printing the fiber tree
 
-If you can't find an element and aren't sure what `testID` values are available, evaluate `__testBridge__.getTree()` via a temporary test:
+If you can't find an element and aren't sure what `testID` values are available, use `app.getTree()` in a temporary test:
 
 ```ts
 it('debug — print fiber tree', async (app: AppSession) => {
-  const tree = await (app as any)['hermes'].evaluate('JSON.stringify(__testBridge__.getTree(10))');
-  console.log(tree);
+  console.log(JSON.stringify(await app.getTree(10), null, 2));
 });
 ```
 
-Or add `testID` props to components incrementally and use `find` to confirm each one is reachable before building the full test.
+The optional depth argument (default 30) limits how deep the serialization goes. Each node includes `type`, `testID`, and `children`.

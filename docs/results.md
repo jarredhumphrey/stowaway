@@ -1,5 +1,47 @@
 # Results & CI
 
+## Verbose mode
+
+Enable verbose output with the `--verbose` CLI flag or `VERBOSE=1` environment variable:
+
+```bash
+BUNDLE_ID=com.myorg.myapp tsx e2e/run.ts --verbose
+VERBOSE=1 BUNDLE_ID=com.myorg.myapp tsx e2e/run.ts
+```
+
+In verbose mode, each test prints its name before running, followed by every step as it completes. Only top-level calls from the test are shown — internal polling inside `waitForElement`, `waitForElementToDisappear`, and `scrollAndFind` is suppressed.
+
+```
+  Form
+    → submits the form and shows the success banner
+        find: tab-form
+        tap: tab-form
+        find: btn-submit
+        tap: btn-submit
+        waitFor: form-success
+        find: form-success-text
+    ✓ submits the form and shows the success banner (1247ms)
+```
+
+Steps use these labels based on what was called:
+
+| Call | Verbose label |
+|---|---|
+| `app.find(selector)` | `find: <selector>` |
+| `app.findAll(selector)` | `findAll: <selector> (N found)` |
+| `app.waitForElement(selector)` | `waitFor: <selector>` |
+| `app.waitForElementToDisappear(selector)` | `waitForGone: <selector>` |
+| `app.scrollAndFind(testID)` | `scrollAndFind: <testID>` |
+| `element.tap()` | `tap: <testID or node:N>` |
+| `element.typeText(text)` | `typeText: "text" → <testID>` |
+| `element.pressKey(key)` | `pressKey: 'key' → <testID>` |
+| `element.check()` / `uncheck()` | `check: <testID>` / `uncheck: <testID>` |
+| `element.selectOption(value)` | `selectOption: "value" → <testID>` |
+| `element.swipe(dir, dist)` | `swipe: dir Npx on <testID>` |
+| `element.dragTo(target)` | `dragTo: <source> → <target>` |
+
+---
+
 ## Console output
 
 The runner prints a structured summary to stdout during the run:

@@ -27,6 +27,16 @@ await item.longPress();
 await app.waitForElement('context-menu');
 ```
 
+### `element.doubleTap()`
+
+Fires `onDoublePress` or `onDoubleTap` if found on the nearest ancestor. Falls back to calling `onPress` twice for apps that count rapid taps manually. Throws if no press handler is found.
+
+```ts
+const image = await app.find({ testID: 'photo-item' });
+await image.doubleTap();
+await app.waitForElement('like-indicator');
+```
+
 ---
 
 ## Text input
@@ -65,6 +75,22 @@ await input.submitEditing();
 await app.waitForElement('search-results');
 ```
 
+### `element.pressKey(key)`
+
+Fires `onKeyPress({ nativeEvent: { key } })` on the nearest ancestor that has the handler. Useful for apps that react to specific keys — advancing focus on `'Enter'`, clearing on `'Backspace'`, dismissing on `'Escape'`. Throws if no `onKeyPress` handler is found.
+
+```ts
+const input = await app.find({ testID: 'input-name' });
+await input.focus();
+await input.pressKey('Enter');
+
+await input.pressKey('Backspace');
+const indicator = await app.find({ testID: 'last-key-pressed' });
+expect(await indicator.text()).toBe('Last key: Backspace');
+```
+
+Common keys: `'Enter'`, `'Backspace'`, `'Tab'`, `'Escape'`, `'ArrowUp'`, `'ArrowDown'`.
+
 ---
 
 ## Focus and blur
@@ -99,6 +125,67 @@ await app.dismissKeyboard();
 
 ---
 
+## Toggles and pickers
+
+### `element.check()` / `element.uncheck()`
+
+Calls `onValueChange(true)` or `onValueChange(false)` on the nearest ancestor with that handler. Works with `Switch` and any component that uses `onValueChange` as a boolean toggle. Throws if no handler is found.
+
+```ts
+const sw = await app.find({ testID: 'toggle-notifications' });
+await sw.check();
+expect(await sw.isChecked()).toBe(true);
+
+await sw.uncheck();
+expect(await sw.isChecked()).toBe(false);
+```
+
+### `element.isChecked()`
+
+Returns `!!memoizedProps.value` — reads the current controlled value of a `Switch` or similar boolean toggle.
+
+### `element.selectOption(value)`
+
+Calls `onValueChange(value)` on the nearest ancestor with that handler. Works with any component that exposes `onValueChange` — custom pickers, segmented controls, `Picker`, etc. Throws if no handler is found.
+
+```ts
+const picker = await app.find({ testID: 'picker-theme' });
+await picker.selectOption('dark');
+const summary = await app.find({ testID: 'summary-theme' });
+expect(await summary.text()).toBe('Theme: dark');
+```
+
+---
+
+## Gestures
+
+### `element.swipe(direction, distance?)`
+
+Fires a simulated PanResponder gesture sequence (grant → 10 move steps → release) in the given direction. Searches up the fiber tree for the nearest ancestor with PanResponder handlers. `distance` defaults to 100 px.
+
+```ts
+const card = await app.find({ testID: 'swipeable-card' });
+await card.swipe('left', 200);
+await app.waitForElement('delete-action');
+```
+
+Directions: `'left'`, `'right'`, `'up'`, `'down'`.
+
+### `element.dragTo(target)`
+
+Measures the frames of both the source and target elements and fires a PanResponder gesture from the center of the source to the center of the target. Useful for drag-and-drop, sortable lists, and Kanban boards.
+
+```ts
+const dragItem = await app.find({ testID: 'drag-item' });
+const dropZone = await app.find({ testID: 'drop-zone' });
+await dragItem.dragTo(dropZone);
+await app.waitForElement('drop-result');
+```
+
+If frame measurement isn't available (Fabric/new arch limitation), the gesture falls back to a 200 px downward drag.
+
+---
+
 ## Scrolling
 
 ### `element.scrollTo(offset)`
@@ -128,6 +215,74 @@ Scrolls the first visible list or scroll view in 5 000 px steps until the elemen
 ```ts
 const item = await app.scrollAndFind('product-item-99', { timeout: 15_000 });
 await item.tap();
+```
+
+---
+
+## Animation control
+
+### `app.disableAnimations()`
+
+Patches `Animated.timing`, `Animated.spring`, and `Animated.decay` to zero duration, and no-ops `LayoutAnimation.configureNext`. Call in a `beforeAll` hook to eliminate timing-related flakiness across a suite.
+
+```ts
+describe('Checkout', () => {
+  beforeAll(async (app) => {
+    await app.disableAnimations();
+  });
+
+  it('transitions to the confirmation screen', async (app) => {
+    // animated transitions complete instantly — no waitForElement timing issues
+  });
+});
+```
+
+Re-apply after each `reset()` if needed, since the patch is scoped to a single app launch.
+
+---
+
+## Storage
+
+These methods read and write `AsyncStorage`. They require `@react-native-async-storage/async-storage` to be bundled in the app.
+
+```ts
+await app.setStorage('auth-token', 'abc123');
+const token = await app.getStorage('auth-token'); // 'abc123'
+await app.removeStorage('auth-token');
+await app.clearStorage(); // removes all keys
+```
+
+Useful for seeding app state before a test without going through the UI sign-in flow.
+
+---
+
+## Network
+
+### `app.setNetworkOffline(offline)`
+
+When `true`, all `fetch` calls inside the app immediately reject with a network error. Set back to `false` to restore connectivity. The flag is automatically reset to `false` after each `reset()`.
+
+```ts
+it('shows an offline banner when the network drops', async (app) => {
+  await app.setNetworkOffline(true);
+  await app.waitForElement('offline-banner');
+  await app.setNetworkOffline(false);
+  await app.waitForElementToDisappear('offline-banner');
+});
+```
+
+For controlled mock responses, use [`mockNetwork`](./network-mocking.md) instead.
+
+---
+
+## Scoped element queries
+
+`Element` has its own `find` and `findAll` that search only within that element's subtree. This avoids false matches when the same testID or component appears in multiple places on screen.
+
+```ts
+const row = await app.find({ testID: 'cart-item-2' });
+const qty = await row.find({ testID: 'quantity-label' }); // scoped to this row only
+expect(await qty.text()).toBe('2');
 ```
 
 ---

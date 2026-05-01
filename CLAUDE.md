@@ -239,6 +239,7 @@ All config comes from environment variables, read once at startup by `loadConfig
 | `TEST_RESULTS_DIR` | `test-results` | |
 | `DEFAULT_TIMEOUT` | `10000` | ms |
 | `SUITE_NAME` | — | printed in the run header |
+| `VERBOSE` | `false` | `1` or `true` enables step-level logging; also enabled by `--verbose` CLI flag |
 
 `pollInterval` (250 ms) is not configurable via env — set directly in `loadConfig()` return.
 

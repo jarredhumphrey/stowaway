@@ -202,6 +202,8 @@ export class TestRunner {
             await hook(session);
           }
 
+          if (this.config.verbose) console.log(`    → ${test.name}`);
+
           const start = Date.now();
           let status: 'pass' | 'fail' = 'pass';
           let errorMsg: string | undefined;

@@ -1,6 +1,16 @@
 import type { HermesSession } from './HermesSession';
 import { type Selector, selectorToExpressionWithin, selectorToAllExpressionWithin } from './selectors';
 
+function selectorLabel(sel: Selector): string {
+  if ('testID' in sel) return sel.testID;
+  if ('text' in sel) return typeof sel.text === 'string' ? `"${sel.text}"` : sel.text.toString();
+  if ('component' in sel) return sel.component;
+  if ('accessibilityLabel' in sel) return `a11y:"${sel.accessibilityLabel}"`;
+  if ('accessibilityRole' in sel) return `role:${sel.accessibilityRole}`;
+  if ('placeholder' in sel) return `placeholder:"${sel.placeholder}"`;
+  return JSON.stringify(sel);
+}
+
 export interface NodeDescriptor {
   nodeId: number;
   componentType: string;
@@ -18,10 +28,19 @@ export class Element {
   constructor(
     private descriptor: NodeDescriptor,
     private session: HermesSession,
+    private verbose = false,
   ) {}
 
   get nodeId(): number {
     return this.descriptor.nodeId;
+  }
+
+  get label(): string {
+    return this.descriptor.testID ?? `node:${this.descriptor.nodeId}`;
+  }
+
+  private log(msg: string): void {
+    if (this.verbose) console.log(`        ${msg}`);
   }
 
   async tap(): Promise<void> {
@@ -34,6 +53,7 @@ export class Element {
           `(${this.descriptor.componentType})`,
       );
     }
+    this.log(`tap: ${this.label}`);
   }
 
   async longPress(): Promise<void> {
@@ -46,6 +66,7 @@ export class Element {
           `(${this.descriptor.componentType})`,
       );
     }
+    this.log(`longPress: ${this.label}`);
   }
 
   async typeText(text: string): Promise<void> {
@@ -58,10 +79,20 @@ export class Element {
           `(${this.descriptor.componentType})`,
       );
     }
+    this.log(`typeText: ${JSON.stringify(text)} → ${this.label}`);
   }
 
   async clearText(): Promise<void> {
-    await this.typeText('');
+    const ok = await this.session.evaluate<boolean>(
+      `__testBridge__.typeText(${this.descriptor.nodeId}, "")`,
+    );
+    if (!ok) {
+      throw new Error(
+        `clearText() failed — no onChangeText found on node ${this.descriptor.nodeId} ` +
+          `(${this.descriptor.componentType})`,
+      );
+    }
+    this.log(`clearText: ${this.label}`);
   }
 
   async focus(): Promise<void> {
@@ -73,6 +104,7 @@ export class Element {
         `focus() failed — no onFocus or stateNode.focus found on node ${this.descriptor.nodeId}`,
       );
     }
+    this.log(`focus: ${this.label}`);
   }
 
   async blur(): Promise<void> {
@@ -84,6 +116,7 @@ export class Element {
         `blur() failed — no onBlur or stateNode.blur found on node ${this.descriptor.nodeId}`,
       );
     }
+    this.log(`blur: ${this.label}`);
   }
 
   async submitEditing(): Promise<void> {
@@ -95,6 +128,7 @@ export class Element {
         `submitEditing() failed — no onSubmitEditing found on node ${this.descriptor.nodeId}`,
       );
     }
+    this.log(`submitEditing: ${this.label}`);
   }
 
   async scrollTo(offset: number): Promise<void> {
@@ -106,6 +140,7 @@ export class Element {
         `scrollTo() failed — node ${this.descriptor.nodeId} is not a scrollable component`,
       );
     }
+    this.log(`scrollTo: ${offset}px on ${this.label}`);
   }
 
   async swipe(
@@ -120,6 +155,7 @@ export class Element {
         `swipe('${direction}') failed on node ${this.descriptor.nodeId}: ${result}`,
       );
     }
+    this.log(`swipe: ${direction} ${distance}px on ${this.label}`);
   }
 
   async scrollToX(offset: number): Promise<void> {
@@ -131,6 +167,7 @@ export class Element {
         `scrollToX() failed — node ${this.descriptor.nodeId} is not a horizontally scrollable component`,
       );
     }
+    this.log(`scrollToX: ${offset}px on ${this.label}`);
   }
 
   async text(): Promise<string> {
@@ -155,6 +192,7 @@ export class Element {
           `(${this.descriptor.componentType})`,
       );
     }
+    this.log(`doubleTap: ${this.label}`);
   }
 
   async dragTo(target: Element): Promise<void> {
@@ -167,6 +205,7 @@ export class Element {
     if (result !== true) {
       throw new Error(`dragTo() failed on node ${this.descriptor.nodeId}: ${result}`);
     }
+    this.log(`dragTo: ${this.label} → ${target.label}`);
   }
 
   async exists(): Promise<boolean> {
@@ -211,6 +250,7 @@ export class Element {
         `pressKey('${key}') failed — no onKeyPress found on node ${this.descriptor.nodeId}`,
       );
     }
+    this.log(`pressKey: '${key}' → ${this.label}`);
   }
 
   async isChecked(): Promise<boolean> {
@@ -226,6 +266,7 @@ export class Element {
     if (!ok) {
       throw new Error(`check() failed — no onValueChange found on node ${this.descriptor.nodeId}`);
     }
+    this.log(`check: ${this.label}`);
   }
 
   async uncheck(): Promise<void> {
@@ -235,6 +276,7 @@ export class Element {
     if (!ok) {
       throw new Error(`uncheck() failed — no onValueChange found on node ${this.descriptor.nodeId}`);
     }
+    this.log(`uncheck: ${this.label}`);
   }
 
   async selectOption(value: string | number | boolean): Promise<void> {
@@ -244,6 +286,7 @@ export class Element {
     if (!ok) {
       throw new Error(`selectOption() failed — no onValueChange found on node ${this.descriptor.nodeId}`);
     }
+    this.log(`selectOption: ${JSON.stringify(value)} → ${this.label}`);
   }
 
   async find(selector: Selector): Promise<Element> {
@@ -254,13 +297,15 @@ export class Element {
         `find() within node ${this.descriptor.nodeId} — not found: ${JSON.stringify(selector)}`,
       );
     }
-    return new Element(descriptor, this.session);
+    this.log(`find: ${selectorLabel(selector)} within ${this.label}`);
+    return new Element(descriptor, this.session, this.verbose);
   }
 
   async findAll(selector: Selector): Promise<Element[]> {
     const expr = selectorToAllExpressionWithin(this.descriptor.nodeId, selector);
     const descriptors = await this.session.evaluate<NodeDescriptor[]>(expr);
-    return descriptors.map(d => new Element(d, this.session));
+    this.log(`findAll: ${selectorLabel(selector)} within ${this.label} (${descriptors.length} found)`);
+    return descriptors.map(d => new Element(d, this.session, this.verbose));
   }
 
   async props(): Promise<Record<string, unknown>> {

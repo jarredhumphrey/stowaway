@@ -43,6 +43,7 @@ All configuration comes from environment variables, read once at startup via `lo
 | `DEFAULT_TIMEOUT` | `10000` | Default wait timeout in ms |
 | `TEST_RESULTS_DIR` | `test-results` | Where JSON/XML results and screenshots land |
 | `SUITE_NAME` | — | Optional label printed in the run header |
+| `VERBOSE` | — | `1` or `true` — prints each test step as it completes; also enabled by `--verbose` CLI flag |
 
 A typical `package.json` script:
 
@@ -84,25 +85,17 @@ Key things to know up front:
 
 ## Entry point
 
-Create a `run.ts` (or `run.js`) that lists the spec files and hands them to `TestRunner`:
+Create a `run.ts` alongside your spec files. The simplest form passes the directory — the runner auto-discovers every `*.spec.ts` file inside it alphabetically:
 
 ```ts
 // e2e/run.ts
-import * as path from 'path';
-import * as fs from 'fs';
 import { TestRunner, loadConfig } from 'stowaway';
 
-const specsDir = path.join(__dirname, 'specs');
-const specFiles = fs
-  .readdirSync(specsDir)
-  .filter(f => f.endsWith('.spec.ts'))
-  .map(f => path.join(specsDir, f));
-
 const runner = new TestRunner(loadConfig());
-await runner.run(specFiles);
+runner.run(__dirname);
 ```
 
-Or list them explicitly if you want a fixed order:
+To control order explicitly, pass an array of paths instead:
 
 ```ts
 runner.run([
@@ -116,6 +109,9 @@ Run it with `tsx`:
 
 ```bash
 BUNDLE_ID=com.myorg.myapp tsx e2e/run.ts
+
+# Step-level output for debugging:
+BUNDLE_ID=com.myorg.myapp tsx e2e/run.ts --verbose
 ```
 
 ## Marking elements for testing

@@ -123,9 +123,74 @@ expect(props.accessibilityState?.disabled).toBe(false);
 
 ---
 
-## Negation
+## Async auto-waiting matchers
 
-All matchers support `.not` to invert the assertion:
+When `expect()` receives an `Element` (rather than a primitive), it returns an `AsyncElementExpect` that polls every 250 ms until the assertion passes or the timeout expires (default: 4 000 ms). This eliminates the `waitForElement` + `expect(await el.text()).toBe(...)` pattern and handles flakiness from React re-renders.
+
+```ts
+// These are equivalent but the async form handles timing automatically:
+const banner = await app.waitForElement('form-success-text');
+await expect(banner).toHaveText('Submitted successfully!');
+```
+
+All async matchers accept an optional `{ timeout }` override:
+
+```ts
+await expect(element).toHaveText('Done', { timeout: 8_000 });
+```
+
+### `toHaveText(expected)`
+
+Polls until the element's concatenated text equals `expected`. Accepts a string (exact match) or a `RegExp`.
+
+```ts
+await expect(banner).toHaveText('Submitted successfully!');
+await expect(banner).toHaveText(/submitted/i);
+```
+
+### `toHaveValue(expected)`
+
+Polls until `element.inputValue()` equals `expected`. Use this for `TextInput` values instead of `text()`.
+
+```ts
+const input = await app.find({ testID: 'input-name' });
+await input.typeText('Jane Doe');
+await expect(input).toHaveValue('Jane Doe');
+```
+
+### `toBeVisible()`
+
+Polls until `element.isVisible()` (i.e. `exists()`) returns `true`.
+
+```ts
+await expect(loadingSpinner).toBeVisible();
+```
+
+### `toBeEnabled()`
+
+Polls until `element.isEnabled()` returns `true` — i.e. the element is not disabled.
+
+```ts
+const submitBtn = await app.find({ testID: 'btn-submit' });
+await expect(submitBtn).toBeEnabled();
+```
+
+### Negation with `.not`
+
+All async matchers support `.not`:
+
+```ts
+await expect(errorBanner).not.toHaveText('Success');
+await expect(spinner).not.toBeVisible();
+```
+
+`.not` passes as soon as the condition is false, so `not.toBeVisible()` is a convenient alternative to `waitForElementToDisappear` when you already have an `Element` reference.
+
+---
+
+## Negation (sync)
+
+All sync matchers support `.not` to invert the assertion:
 
 ```ts
 expect(await el.exists()).not.toBe(false);

@@ -2,7 +2,14 @@
 
 ## The registration model
 
-`describe` and `it` are synchronous calls at module scope. When `TestRunner.run(specFiles)` is called, it imports each spec file in order; the side effects of those imports register all suites and tests. The runner then executes them sequentially.
+`describe` and `it` are synchronous calls at module scope. When `TestRunner.run()` is called, it imports each spec file in order; the side effects of those imports register all suites and tests. The runner then executes them sequentially.
+
+`run()` accepts either a directory path (auto-discovers `*.spec.ts` files alphabetically) or an explicit `string[]` for a fixed order:
+
+```ts
+runner.run(__dirname);                  // auto-discover
+runner.run([path.resolve(__dirname, 'auth.spec.ts'), ...]);  // explicit order
+```
 
 ```ts
 import { describe, it, beforeEach } from 'stowaway';
