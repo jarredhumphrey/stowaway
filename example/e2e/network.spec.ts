@@ -103,3 +103,24 @@ describe('Network — suite-level mock', () => {
     expect(await name.text()).toBe('Suite User');
   });
 });
+
+describe('Network — offline simulation', () => {
+  it('shows error state when network is offline', async (app: AppSession) => {
+    await goToNetwork(app);
+    await app.setNetworkOffline(true);
+    await (await app.find({ testID: 'btn-fetch-user' })).tap();
+    await app.waitForElement('network-error');
+  });
+
+  it('recovers after offline is cleared', async (app: AppSession) => {
+    await goToNetwork(app);
+    await app.mockNetwork(
+      { url: /jsonplaceholder.*\/users\/1/ },
+      { status: 200, body: { name: 'Back Online', email: 'online@example.com' } },
+    );
+    // offline is reset to false automatically after each reset() re-injection
+    await (await app.find({ testID: 'btn-fetch-user' })).tap();
+    const name = await app.waitForElement('network-user-name');
+    expect(await name.text()).toBe('Back Online');
+  });
+});

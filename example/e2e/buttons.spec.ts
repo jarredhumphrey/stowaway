@@ -74,4 +74,31 @@ describe('Buttons', () => {
     await card.swipe('left', 120);
     await app.waitForElement('swipe-dismissed');
   });
+
+  it('finds a button by accessibilityLabel', async (app: AppSession) => {
+    const btn = await app.find({ accessibilityLabel: 'Increment counter' });
+    const value = await app.find({ testID: 'counter-value' });
+    await btn.tap();
+    expect(await value.text()).toBe('1');
+  });
+
+  it('finds a button by partial accessibilityLabel', async (app: AppSession) => {
+    const btn = await app.find({ accessibilityLabel: 'Increment', exact: false });
+    const value = await app.find({ testID: 'counter-value' });
+    await btn.tap();
+    expect(await value.text()).toBe('1');
+  });
+
+  it('scoped findAll returns only the 5 action buttons', async (app: AppSession) => {
+    const actionList = await app.find({ testID: 'action-list' });
+    const buttons = await actionList.findAll({ component: 'TouchableOpacity' });
+    expect(buttons.length).toBe(5);
+  });
+
+  it('waitForElement with text selector waits for async result', async (app: AppSession) => {
+    const btn = await app.find({ testID: 'btn-async' });
+    await btn.tap();
+    const result = await app.waitForElement({ text: 'Done!' }, { timeout: 5_000 });
+    expect(await result.text()).toBe('Done!');
+  });
 });

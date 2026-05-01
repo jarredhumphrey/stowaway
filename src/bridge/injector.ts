@@ -33,6 +33,12 @@ export const BRIDGE_INJECTOR_SCRIPT = `
     walk(fiber.sibling, visitor);
   }
 
+  function getTypeName(fiber) {
+    return typeof fiber.type === 'string'
+      ? fiber.type
+      : (fiber.type && (fiber.type.displayName || fiber.type.name)) || 'Unknown';
+  }
+
   function findByTestID(testID) {
     var found = null;
     var roots = getRoots();
@@ -53,15 +59,36 @@ export const BRIDGE_INJECTOR_SCRIPT = `
     return { nodeId: nodeId, componentType: name, testID: testID };
   }
 
+  function findByAccessibilityLabel(label, exact) {
+    var results = [];
+    var roots = getRoots();
+    for (var i = 0; i < roots.length; i++) {
+      walk(roots[i], function (fiber) {
+        var p = fiber.memoizedProps;
+        if (!p) return;
+        var al = p.accessibilityLabel;
+        if (typeof al !== 'string') return;
+        var match = exact === false ? al.includes(label) : al === label;
+        if (!match) return;
+        var nodeId = register(fiber);
+        var typeName = typeof fiber.type === 'string'
+          ? fiber.type
+          : (fiber.type && (fiber.type.displayName || fiber.type.name)) || 'Unknown';
+        results.push({ nodeId: nodeId, componentType: typeName });
+      });
+    }
+    return results;
+  }
+
   function findByComponent(name, props) {
     var results = [];
     var roots = getRoots();
     for (var i = 0; i < roots.length; i++) {
       walk(roots[i], function (fiber) {
-        var typeName = typeof fiber.type === 'string'
-          ? fiber.type
-          : (fiber.type && (fiber.type.displayName || fiber.type.name)) || '';
-        if (typeName !== name) return;
+        if (getTypeName(fiber) !== name) return;
+        // Skip inner wrappers: if the parent fiber has the same name, this fiber is the
+        // inner implementation of a HOC stack (e.g. forwardRef inside memo, same displayName).
+        if (fiber.return && getTypeName(fiber.return) === name) return;
         if (props) {
           var keys = Object.keys(props);
           for (var k = 0; k < keys.length; k++) {
@@ -69,7 +96,7 @@ export const BRIDGE_INJECTOR_SCRIPT = `
           }
         }
         var nodeId = register(fiber);
-        results.push({ nodeId: nodeId, componentType: typeName });
+        results.push({ nodeId: nodeId, componentType: name });
       });
     }
     return results;
@@ -475,9 +502,60 @@ export const BRIDGE_INJECTOR_SCRIPT = `
     return 'NO_HANDLERS';
   }
 
+  // ── Scoped queries ────────────────────────────────────────────────────────────
+  // Walk only the subtree of rootNodeId (starting from its first child).
+
+  function findByTestIDWithin(rootNodeId, testID) {
+    var rootFiber = getCurrentFiber(rootNodeId);
+    if (!rootFiber) return null;
+    var found = null;
+    walk(rootFiber.child, function (fiber) {
+      if (found) return;
+      if (fiber.memoizedProps && fiber.memoizedProps.testID === testID) {
+        found = { nodeId: register(fiber), componentType: getTypeName(fiber), testID: testID };
+      }
+    });
+    return found;
+  }
+
+  function findByComponentWithin(rootNodeId, name, props) {
+    var rootFiber = getCurrentFiber(rootNodeId);
+    if (!rootFiber) return [];
+    var results = [];
+    walk(rootFiber.child, function (fiber) {
+      if (getTypeName(fiber) !== name) return;
+      if (fiber.return && getTypeName(fiber.return) === name) return;
+      if (props) {
+        var keys = Object.keys(props);
+        for (var k = 0; k < keys.length; k++) {
+          if (!fiber.memoizedProps || fiber.memoizedProps[keys[k]] !== props[keys[k]]) return;
+        }
+      }
+      results.push({ nodeId: register(fiber), componentType: name });
+    });
+    return results;
+  }
+
+  function findByAccessibilityLabelWithin(rootNodeId, label, exact) {
+    var rootFiber = getCurrentFiber(rootNodeId);
+    if (!rootFiber) return [];
+    var results = [];
+    walk(rootFiber.child, function (fiber) {
+      var p = fiber.memoizedProps;
+      if (!p) return;
+      var al = p.accessibilityLabel;
+      if (typeof al !== 'string') return;
+      var match = exact === false ? al.includes(label) : al === label;
+      if (!match) return;
+      results.push({ nodeId: register(fiber), componentType: getTypeName(fiber) });
+    });
+    return results;
+  }
+
   globalThis.__testBridge__ = {
     findByTestID: findByTestID,
     findByComponent: findByComponent,
+    findByAccessibilityLabel: findByAccessibilityLabel,
     tap: tap,
     longPress: longPress,
     typeText: typeText,
@@ -495,6 +573,9 @@ export const BRIDGE_INJECTOR_SCRIPT = `
     scrollElementToX: scrollElementToX,
     dismissKeyboard: dismissKeyboard,
     swipe: swipe,
+    findByTestIDWithin: findByTestIDWithin,
+    findByComponentWithin: findByComponentWithin,
+    findByAccessibilityLabelWithin: findByAccessibilityLabelWithin,
   };
 
   return true;

@@ -104,6 +104,7 @@ export function ButtonsScreen() {
         </TouchableOpacity>
         <TouchableOpacity
           testID="btn-increment"
+          accessibilityLabel="Increment counter"
           style={[styles.btn, styles.flex]}
           onPress={() => setCount(c => c + 1)}
         >
@@ -196,16 +197,18 @@ export function ButtonsScreen() {
 
       {/* ── Action list ─────────────────────────────────────────── */}
       <Text style={styles.sectionLabel}>Actions</Text>
-      {ACTION_BUTTONS.map(name => (
-        <TouchableOpacity
-          key={name}
-          testID={`btn-action-${name.toLowerCase()}`}
-          style={styles.btn}
-          onPress={() => {}}
-        >
-          <Text style={styles.btnText}>{name}</Text>
-        </TouchableOpacity>
-      ))}
+      <View testID="action-list">
+        {ACTION_BUTTONS.map(name => (
+          <TouchableOpacity
+            key={name}
+            testID={`btn-action-${name.toLowerCase()}`}
+            style={styles.btn}
+            onPress={() => {}}
+          >
+            <Text style={styles.btnText}>{name}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
     </ScrollView>
   );
 }

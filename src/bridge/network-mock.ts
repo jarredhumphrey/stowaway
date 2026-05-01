@@ -7,6 +7,8 @@ export const NETWORK_MOCK_SCRIPT = `
     requests: [],
   };
 
+  globalThis.__testNetworkOffline__ = false;
+
   function tryParseJson(str) {
     if (typeof str !== 'string') return str;
     try { return JSON.parse(str); } catch (e) { return str; }
@@ -41,6 +43,10 @@ export const NETWORK_MOCK_SCRIPT = `
         method: method.toUpperCase(),
         body: body ? tryParseJson(body) : null,
       });
+
+      if (globalThis.__testNetworkOffline__) {
+        return Promise.reject(new TypeError('Network request failed'));
+      }
 
       var mock = findMock(url, method);
       if (!mock) return originalFetch.apply(this, arguments);

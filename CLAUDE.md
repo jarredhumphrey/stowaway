@@ -32,7 +32,8 @@ src/
     Device.ts           ← xcrun simctl (iOS) and adb (Android) wrappers
     HermesSession.ts    ← CDP WebSocket client; Runtime.evaluate against Hermes
     AppSession.ts       ← orchestrates Device + HermesSession; public test API
-    Element.ts          ← proxy for a single fiber node (tap, text, exists, props)
+    Element.ts          ← proxy for a single fiber node (tap, text, exists, props, find/findAll)
+    selectors.ts        ← Selector type + JS expression builders (global + within-scoped)
     TestRunner.ts       ← describe/it/beforeAll/etc + runner loop + result output
     expect.ts           ← custom assertion library; throws AssertionError on failure
   bridge/
@@ -64,8 +65,9 @@ The `Selector` union used by `find` / `findAll`:
 type Selector =
   | { testID: string }
   | { component: string; props?: Record<string, unknown> }
-  | { text: string; exact?: boolean }   // exact defaults to true; false = substring match
-  | { text: RegExp }                     // regex match
+  | { text: string; exact?: boolean }              // exact defaults to true; false = substring match
+  | { text: RegExp }                               // regex match
+  | { accessibilityLabel: string; exact?: boolean } // exact defaults to true; false = substring match
 ```
 
 Key methods on `AppSession`:
@@ -74,9 +76,11 @@ Key methods on `AppSession`:
 |--------|-----------|
 | `find(selector)` | First match; throws if none |
 | `findAll(selector)` | All matches; empty array if none |
-| `waitForElement(testID, opts?)` | Polls `find({ testID })` until `timeout` ms |
-| `waitForElementToDisappear(testID, opts?)` | Polls until the element leaves the committed tree |
+| `findNth(selector, n)` | Returns the nth (0-based) match from `findAll`; throws if out of range |
+| `waitForElement(selector \| testID, opts?)` | Polls `find(selector)` until `timeout` ms; string argument treated as `{ testID }` |
+| `waitForElementToDisappear(selector \| testID, opts?)` | Polls until the element leaves the committed tree; string treated as `{ testID }` |
 | `waitFor(fn, opts?)` | Polls an arbitrary `() => Promise<boolean>` until `timeout` ms |
+| `getTree(maxDepth?)` | Returns the serialized fiber tree (default depth 30) — useful for debugging testIDs |
 | `scrollAndFind(testID, opts?)` | Scrolls a visible FlatList/ScrollView in 5 000-px steps, polling after each until `testID` appears |
 | `screenshot(name)` | Saves `<testResultsDir>/<name>-<timestamp>.png` |
 | `dismissKeyboard()` | Blurs the first TextInput found in the tree |
@@ -89,6 +93,7 @@ Key methods on `AppSession`:
 | `getStorage(key)` | Reads a string from AsyncStorage; returns `null` if absent. |
 | `removeStorage(key)` | Deletes a key from AsyncStorage. |
 | `clearStorage()` | Clears all AsyncStorage keys. |
+| `setNetworkOffline(offline)` | When `true`, all `fetch` calls reject with a network error (requests are still logged). Automatically reset to `false` after each `reset()`. |
 
 ### Element API
 
@@ -96,6 +101,8 @@ Key methods on `AppSession`:
 
 | Method | Behaviour |
 |--------|-----------|
+| `find(selector)` | Scoped query — first match within this element's subtree; throws if none |
+| `findAll(selector)` | Scoped query — all matches within this element's subtree; empty array if none |
 | `tap()` | Calls nearest ancestor `onPress` with `{ nativeEvent: {} }`; throws if not found |
 | `longPress()` | Calls nearest ancestor `onLongPress`; throws if not found |
 | `typeText(text)` | Calls `onChangeText` prop; throws if not found |
@@ -145,6 +152,10 @@ The IIFE installs `globalThis.__testBridge__` with these methods. Extend `inject
 |--------|---------|
 | `findByTestID(testID)` | `NodeDescriptor \| null` |
 | `findByComponent(name, props?)` | `NodeDescriptor[]` |
+| `findByAccessibilityLabel(label, exact)` | `NodeDescriptor[]` — `exact=true` strict equality, `exact=false` substring |
+| `findByTestIDWithin(rootNodeId, testID)` | `NodeDescriptor \| null` — scoped to subtree of `rootNodeId` |
+| `findByComponentWithin(rootNodeId, name, props?)` | `NodeDescriptor[]` — scoped to subtree of `rootNodeId` |
+| `findByAccessibilityLabelWithin(rootNodeId, label, exact)` | `NodeDescriptor[]` — scoped to subtree of `rootNodeId` |
 | `tap(nodeId)` | `boolean` |
 | `longPress(nodeId)` | `boolean` |
 | `typeText(nodeId, text)` | `boolean` |

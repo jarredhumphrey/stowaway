@@ -5,12 +5,13 @@ import { BRIDGE_INJECTOR_SCRIPT } from '../bridge/injector';
 import { NETWORK_MOCK_SCRIPT } from '../bridge/network-mock';
 import { STORAGE_BRIDGE_SCRIPT } from '../bridge/storage';
 import type { E2EConfig } from '../config';
+import {
+  type Selector,
+  selectorToExpression,
+  selectorToAllExpression,
+} from './selectors';
 
-export type Selector =
-  | { testID: string }
-  | { component: string; props?: Record<string, unknown> }
-  | { text: string; exact?: boolean }
-  | { text: RegExp };
+export type { Selector };
 
 export type NetworkMatcher = {
   url: string | RegExp;
@@ -121,6 +122,10 @@ export class AppSession {
     );
   }
 
+  async setNetworkOffline(offline: boolean): Promise<void> {
+    await this.hermes.evaluate(`globalThis.__testNetworkOffline__ = ${offline}`);
+  }
+
   // Called by TestRunner around beforeAll hooks
   enterSuiteScope(): void { this.inSuiteScope = true; }
   exitSuiteScope(): void  { this.inSuiteScope = false; }
@@ -155,24 +160,38 @@ export class AppSession {
   }
 
   async waitForElement(
-    testID: string,
+    selectorOrTestID: Selector | string,
     opts?: { timeout?: number; interval?: number },
   ): Promise<Element> {
+    const selector: Selector = typeof selectorOrTestID === 'string'
+      ? { testID: selectorOrTestID }
+      : selectorOrTestID;
     const timeout = opts?.timeout ?? this.config.defaultTimeout;
     const interval = opts?.interval ?? this.config.pollInterval;
     const deadline = Date.now() + timeout;
 
     while (Date.now() < deadline) {
       try {
-        const el = await this.find({ testID });
-        return el;
+        return await this.find(selector);
       } catch {
         await sleep(interval);
       }
     }
     throw new Error(
-      `waitForElement("${testID}") timed out after ${timeout}ms`,
+      `waitForElement(${JSON.stringify(selectorOrTestID)}) timed out after ${timeout}ms`,
     );
+  }
+
+  async findNth(selector: Selector, n: number): Promise<Element> {
+    const all = await this.findAll(selector);
+    if (n < 0 || n >= all.length) {
+      throw new Error(`findNth() — index ${n} out of range (found ${all.length})`);
+    }
+    return all[n];
+  }
+
+  async getTree(maxDepth = 30): Promise<unknown> {
+    return this.hermes.evaluate(`__testBridge__.getTree(${maxDepth})`);
   }
 
   async waitFor(
@@ -222,21 +241,32 @@ export class AppSession {
   }
 
   async waitForElementToDisappear(
-    testID: string,
+    selectorOrTestID: Selector | string,
     opts?: { timeout?: number; interval?: number },
   ): Promise<void> {
+    const selector: Selector = typeof selectorOrTestID === 'string'
+      ? { testID: selectorOrTestID }
+      : selectorOrTestID;
     const timeout = opts?.timeout ?? this.config.defaultTimeout;
     const interval = opts?.interval ?? this.config.pollInterval;
     const deadline = Date.now() + timeout;
 
     while (Date.now() < deadline) {
-      const gone = await this.hermes.evaluate<boolean>(
-        `!__testBridge__.exists(${JSON.stringify(testID)})`,
-      );
-      if (gone) return;
+      if ('testID' in selector) {
+        const gone = await this.hermes.evaluate<boolean>(
+          `!__testBridge__.exists(${JSON.stringify(selector.testID)})`,
+        );
+        if (gone) return;
+      } else {
+        let found = false;
+        try { await this.find(selector); found = true; } catch { /* disappeared */ }
+        if (!found) return;
+      }
       await sleep(interval);
     }
-    throw new Error(`waitForElementToDisappear("${testID}") timed out after ${timeout}ms`);
+    throw new Error(
+      `waitForElementToDisappear(${JSON.stringify(selectorOrTestID)}) timed out after ${timeout}ms`,
+    );
   }
 
   async dismissKeyboard(): Promise<void> {
@@ -378,81 +408,6 @@ function serializeMatcher(matcher: NetworkMatcher): SerializedMatcher {
 
 function matcherKey(m: SerializedMatcher): string {
   return `${m.method ?? '*'}:${m.urlType}:${m.url ?? m.pattern ?? ''}:${m.flags ?? ''}`;
-}
-
-// ── Selector helpers ──────────────────────────────────────────────────────────
-
-function selectorToExpression(selector: Selector): string {
-  if ('testID' in selector) {
-    return `__testBridge__.findByTestID(${JSON.stringify(selector.testID)})`;
-  }
-  if ('component' in selector) {
-    const props = selector.props ? JSON.stringify(selector.props) : 'null';
-    return `(function() { var r = __testBridge__.findByComponent(${JSON.stringify(selector.component)}, ${props}); return r.length ? r[0] : null; })()`;
-  }
-  // text selector — walk Text fibers and match content
-  const ts = selector as { text: string | RegExp; exact?: boolean };
-  if (ts.text instanceof RegExp) {
-    return `(function() {
-      var rx = new RegExp(${JSON.stringify(ts.text.source)}, ${JSON.stringify(ts.text.flags)});
-      var results = __testBridge__.findByComponent('Text');
-      for (var i = 0; i < results.length; i++) {
-        if (rx.test(__testBridge__.getText(results[i].nodeId))) return results[i];
-      }
-      return null;
-    })()`;
-  }
-  if (ts.exact === false) {
-    return `(function() {
-      var needle = ${JSON.stringify(ts.text)};
-      var results = __testBridge__.findByComponent('Text');
-      for (var i = 0; i < results.length; i++) {
-        if (__testBridge__.getText(results[i].nodeId).includes(needle)) return results[i];
-      }
-      return null;
-    })()`;
-  }
-  return `(function() {
-    var results = __testBridge__.findByComponent('Text');
-    for (var i = 0; i < results.length; i++) {
-      var t = __testBridge__.getText(results[i].nodeId);
-      if (t === ${JSON.stringify(ts.text)}) return results[i];
-    }
-    return null;
-  })()`;
-}
-
-function selectorToAllExpression(selector: Selector): string {
-  if ('testID' in selector) {
-    return `(function() { var r = __testBridge__.findByTestID(${JSON.stringify(selector.testID)}); return r ? [r] : []; })()`;
-  }
-  if ('component' in selector) {
-    const props = selector.props ? JSON.stringify(selector.props) : 'null';
-    return `__testBridge__.findByComponent(${JSON.stringify(selector.component)}, ${props})`;
-  }
-  const ts = selector as { text: string | RegExp; exact?: boolean };
-  if (ts.text instanceof RegExp) {
-    return `(function() {
-      var rx = new RegExp(${JSON.stringify(ts.text.source)}, ${JSON.stringify(ts.text.flags)});
-      return __testBridge__.findByComponent('Text').filter(function(r) {
-        return rx.test(__testBridge__.getText(r.nodeId));
-      });
-    })()`;
-  }
-  if (ts.exact === false) {
-    return `(function() {
-      var needle = ${JSON.stringify(ts.text)};
-      return __testBridge__.findByComponent('Text').filter(function(r) {
-        return __testBridge__.getText(r.nodeId).includes(needle);
-      });
-    })()`;
-  }
-  return `(function() {
-    var results = __testBridge__.findByComponent('Text');
-    return results.filter(function(r) {
-      return __testBridge__.getText(r.nodeId) === ${JSON.stringify(ts.text)};
-    });
-  })()`;
 }
 
 function sleep(ms: number): Promise<void> {

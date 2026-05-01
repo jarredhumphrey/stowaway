@@ -1,4 +1,5 @@
 import type { HermesSession } from './HermesSession';
+import { type Selector, selectorToExpressionWithin, selectorToAllExpressionWithin } from './selectors';
 
 export interface NodeDescriptor {
   nodeId: number;
@@ -165,6 +166,23 @@ export class Element {
     return this.session.evaluate<Frame | null>(
       `__testBridge__.getFrame(${this.descriptor.nodeId})`,
     );
+  }
+
+  async find(selector: Selector): Promise<Element> {
+    const expr = selectorToExpressionWithin(this.descriptor.nodeId, selector);
+    const descriptor = await this.session.evaluate<NodeDescriptor | null>(expr);
+    if (!descriptor) {
+      throw new Error(
+        `find() within node ${this.descriptor.nodeId} — not found: ${JSON.stringify(selector)}`,
+      );
+    }
+    return new Element(descriptor, this.session);
+  }
+
+  async findAll(selector: Selector): Promise<Element[]> {
+    const expr = selectorToAllExpressionWithin(this.descriptor.nodeId, selector);
+    const descriptors = await this.session.evaluate<NodeDescriptor[]>(expr);
+    return descriptors.map(d => new Element(d, this.session));
   }
 
   async props(): Promise<Record<string, unknown>> {
