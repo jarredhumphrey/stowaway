@@ -82,7 +82,8 @@ Key methods on `AppSession`:
 | `waitForElement(selector \| testID, opts?)` | Polls `find(selector)` until `timeout` ms; string argument treated as `{ testID }` |
 | `waitForElementToDisappear(selector \| testID, opts?)` | Polls until the element leaves the committed tree; string treated as `{ testID }` |
 | `waitFor(fn, opts?)` | Polls an arbitrary `() => Promise<boolean>` until `timeout` ms |
-| `getTree(maxDepth?)` | Returns the serialized fiber tree (default depth 30) — useful for debugging testIDs |
+| `getTree(maxDepth?)` | Returns the serialized fiber tree (default depth 30) — raw data |
+| `printTree(maxDepth?)` | Prints the fiber tree to stdout, one line per node (`ComponentName [testID]`), indented by depth — preferred for debugging missing testIDs |
 | `scrollAndFind(testID, opts?)` | Scrolls a visible FlatList/ScrollView in 5 000-px steps, polling after each until `testID` appears |
 | `screenshot(name)` | Saves `<testResultsDir>/<name>-<timestamp>.png` |
 | `dismissKeyboard()` | Blurs the first TextInput found in the tree |

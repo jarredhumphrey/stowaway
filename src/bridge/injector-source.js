@@ -406,14 +406,14 @@
         ? fiber.type
         : (fiber.type && (fiber.type.displayName || fiber.type.name)) || null;
       var testID = fiber.memoizedProps ? fiber.memoizedProps.testID : undefined;
-      return {
-        type: name,
-        testID: testID || null,
-        children: [
-          serialize(fiber.child, depth + 1),
-          serialize(fiber.sibling, depth + 1),
-        ].filter(Boolean),
-      };
+      var kids = [];
+      var child = fiber.child;
+      while (child) {
+        var node = serialize(child, depth + 1);
+        if (node) kids.push(node);
+        child = child.sibling;
+      }
+      return { type: name, testID: testID || null, children: kids };
     }
     var roots = getRoots();
     return roots.map(function (r) { return serialize(r, 0); });

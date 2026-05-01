@@ -239,12 +239,29 @@ await addBtn.tap();
 
 ## Debugging: printing the fiber tree
 
-If you can't find an element and aren't sure what `testID` values are available, use `app.getTree()` in a temporary test:
+If you can't find an element and aren't sure what `testID` values are available, use `app.printTree()` in a temporary test:
 
 ```ts
 it('debug — print fiber tree', async (app: AppSession) => {
-  console.log(JSON.stringify(await app.getTree(10), null, 2));
+  await app.printTree();
 });
 ```
 
-The optional depth argument (default 30) limits how deep the serialization goes. Each node includes `type`, `testID`, and `children`.
+This prints one line per node — `ComponentName [testID]` — indented by depth. For example:
+
+```
+ButtonsScreen
+  ScrollView
+    Text
+    View
+      TouchableOpacity [btn-increment]
+      TouchableOpacity [btn-decrement]
+    TouchableOpacity [btn-reset]
+```
+
+The optional depth argument (default 30) limits how deep the traversal goes. `getTree()` is also available if you need the raw data:
+
+```ts
+const tree = await app.getTree();
+console.log(JSON.stringify(tree, null, 2));
+```

@@ -213,6 +213,19 @@ export class AppSession {
     return this.hermes.evaluate(`__testBridge__.getTree(${maxDepth})`);
   }
 
+  async printTree(maxDepth = 30): Promise<void> {
+    type TreeNode = { type: string | null; testID: string | null; children: TreeNode[] };
+    const roots = await this.getTree(maxDepth) as TreeNode[];
+    function print(nodes: TreeNode[], depth: number): void {
+      for (const node of nodes) {
+        const label = [node.type ?? '(null)', node.testID ? `[${node.testID}]` : ''].join(' ').trimEnd();
+        console.log('  '.repeat(depth) + label);
+        print(node.children, depth + 1);
+      }
+    }
+    print(roots, 0);
+  }
+
   async waitFor(
     fn: () => Promise<boolean>,
     opts?: { timeout?: number; interval?: number },
