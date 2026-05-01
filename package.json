@@ -17,9 +17,9 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "node scripts/embed-bridge.js && tsc",
     "build:watch": "tsc --watch",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "node scripts/embed-bridge.js && tsc --noEmit",
     "clean": "rm -rf dist"
   },
   "devDependencies": {

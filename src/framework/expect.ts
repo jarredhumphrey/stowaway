@@ -1,3 +1,55 @@
+import { Element } from './Element';
+
+class AsyncElementExpect {
+  constructor(
+    private element: Element,
+    private negated = false,
+  ) {}
+
+  get not(): AsyncElementExpect {
+    return new AsyncElementExpect(this.element, !this.negated);
+  }
+
+  private async poll(
+    check: () => Promise<boolean>,
+    message: string,
+    opts?: { timeout?: number },
+  ): Promise<void> {
+    const timeout = opts?.timeout ?? 4_000;
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      const result = await check();
+      if (this.negated ? !result : result) return;
+      await new Promise(r => setTimeout(r, 250));
+    }
+    const prefix = this.negated ? 'Expected NOT: ' : 'Expected: ';
+    throw new AssertionError(prefix + message);
+  }
+
+  async toHaveText(expected: string | RegExp, opts?: { timeout?: number }): Promise<void> {
+    await this.poll(async () => {
+      const text = await this.element.text();
+      return expected instanceof RegExp ? expected.test(text) : text === expected;
+    }, `element to have text ${JSON.stringify(String(expected))}`, opts);
+  }
+
+  async toBeVisible(opts?: { timeout?: number }): Promise<void> {
+    await this.poll(() => this.element.isVisible(), 'element to be visible', opts);
+  }
+
+  async toBeEnabled(opts?: { timeout?: number }): Promise<void> {
+    await this.poll(() => this.element.isEnabled(), 'element to be enabled', opts);
+  }
+
+  async toHaveValue(expected: string, opts?: { timeout?: number }): Promise<void> {
+    await this.poll(
+      async () => (await this.element.inputValue()) === expected,
+      `element to have value ${JSON.stringify(expected)}`,
+      opts,
+    );
+  }
+}
+
 class Assertion {
   constructor(
     private value: unknown,
@@ -116,6 +168,9 @@ function format(v: unknown): string {
   return JSON.stringify(v);
 }
 
-export function expect(value: unknown): Assertion {
+export function expect(value: Element): AsyncElementExpect;
+export function expect(value: unknown): Assertion;
+export function expect(value: unknown): AsyncElementExpect | Assertion {
+  if (value instanceof Element) return new AsyncElementExpect(value);
   return new Assertion(value);
 }

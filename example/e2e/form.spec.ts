@@ -1,8 +1,6 @@
 import { describe, it, expect } from 'stowaway';
 import type { AppSession } from 'stowaway';
 
-let retryAttempts = 0;
-
 async function goToForm(app: AppSession) {
   const tab = await app.find({ testID: 'tab-form' });
   await tab.tap();
@@ -90,58 +88,66 @@ describe('Form', () => {
   });
 });
 
-// it.skip demo — explicit skip alongside a test that actually runs.
-// The skip is unambiguous here: no it.only is suppressing anything.
-describe('Form — it.skip demo', () => {
-  it.skip('selects a plan (explicitly skipped)', async (app: AppSession) => {
+// New API demos — prop, pressKey, check/uncheck, selectOption, async matchers
+describe('Form — new APIs', () => {
+  it('prop() reads a single named prop', async (app: AppSession) => {
     await goToForm(app);
-    const pro = await app.find({ testID: 'plan-pro' });
-    await pro.tap();
-    const summary = await app.find({ testID: 'summary-plan' });
-    expect(await summary.text()).toBe('Plan: pro');
+    const input = await app.find({ testID: 'input-name' });
+    await input.typeText('Jane');
+    expect(await input.prop('value')).toBe('Jane');
   });
 
-  it('default plan is free (runs normally)', async (app: AppSession) => {
+  it('pressKey fires the onKeyPress handler', async (app: AppSession) => {
     await goToForm(app);
-    const summary = await app.find({ testID: 'summary-plan' });
-    expect(await summary.text()).toBe('Plan: free');
+    const input = await app.find({ testID: 'input-name' });
+    await input.focus();
+    await input.pressKey('Backspace');
+    const indicator = await app.find({ testID: 'last-key-pressed' });
+    expect(await indicator.text()).toBe('Last key: Backspace');
   });
-});
 
-// it.only demo — one test runs; its sibling is implicitly skipped.
-describe('Form — it.only demo', () => {
-  it.only('notifications are off by default (only this runs)', async (app: AppSession) => {
+  it('check() enables the notifications switch', async (app: AppSession) => {
     await goToForm(app);
+    const sw = await app.find({ testID: 'toggle-notifications' });
+    await sw.check();
+    expect(await sw.isChecked()).toBe(true);
     const summary = await app.find({ testID: 'summary-notifications' });
-    expect(await summary.text()).toBe('Notifications: off');
+    expect(await summary.text()).toBe('Notifications: on');
   });
 
-  it('implicitly skipped because of it.only above', async (_app: AppSession) => {
-    throw new Error('This should never execute');
-  });
-});
-
-// describe.skip demo — the entire suite is skipped; no tests inside run.
-describe.skip('Form — describe.skip demo', () => {
-  it('test A (never runs)', async (_app: AppSession) => {
-    throw new Error('This should never execute');
+  it('uncheck() disables the notifications switch', async (app: AppSession) => {
+    await goToForm(app);
+    const sw = await app.find({ testID: 'toggle-notifications' });
+    await sw.check();
+    await sw.uncheck();
+    expect(await sw.isChecked()).toBe(false);
   });
 
-  it('test B (never runs)', async (_app: AppSession) => {
-    throw new Error('This should never execute');
+  it('selectOption changes the theme picker', async (app: AppSession) => {
+    await goToForm(app);
+    const picker = await app.find({ testID: 'picker-theme' });
+    await picker.selectOption('dark');
+    const summary = await app.find({ testID: 'summary-theme' });
+    expect(await summary.text()).toBe('Theme: dark');
   });
-});
 
-// Runner feature demos — retry and auto-screenshot on failure.
-describe('Runner features', () => {
-  it('passes after two failures (retry demo)', async (_app: AppSession) => {
-    retryAttempts++;
-    if (retryAttempts < 3) {
-      throw new Error(`Simulated flake — attempt ${retryAttempts} of 3`);
-    }
-  }, { retries: 2 });
+  it('async toHaveText matches element text', async (app: AppSession) => {
+    await goToForm(app);
+    await (await app.find({ testID: 'btn-submit' })).tap();
+    const banner = await app.waitForElement('form-success-text');
+    await expect(banner).toHaveText('Submitted successfully!');
+  });
 
-  it('intentional failure (screenshot demo)', async (_app: AppSession) => {
-    expect(false).toBe(true);
+  it('async toHaveValue reflects typed input', async (app: AppSession) => {
+    await goToForm(app);
+    const input = await app.find({ testID: 'input-name' });
+    await input.typeText('Jane Doe');
+    await expect(input).toHaveValue('Jane Doe');
+  });
+
+  it('async not.toHaveText asserts text absence', async (app: AppSession) => {
+    await goToForm(app);
+    const summary = await app.find({ testID: 'summary-plan' });
+    await expect(summary).not.toHaveText('Plan: pro');
   });
 });

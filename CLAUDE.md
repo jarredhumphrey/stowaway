@@ -68,6 +68,8 @@ type Selector =
   | { text: string; exact?: boolean }              // exact defaults to true; false = substring match
   | { text: RegExp }                               // regex match
   | { accessibilityLabel: string; exact?: boolean } // exact defaults to true; false = substring match
+  | { accessibilityRole: string }                  // matches memoizedProps.accessibilityRole
+  | { placeholder: string; exact?: boolean }       // matches memoizedProps.placeholder on TextInput etc.
 ```
 
 Key methods on `AppSession`:
@@ -104,17 +106,26 @@ Key methods on `AppSession`:
 | `find(selector)` | Scoped query — first match within this element's subtree; throws if none |
 | `findAll(selector)` | Scoped query — all matches within this element's subtree; empty array if none |
 | `tap()` | Calls nearest ancestor `onPress` with `{ nativeEvent: {} }`; throws if not found |
+| `doubleTap()` | Fires `onDoublePress`/`onDoubleTap` if present; otherwise calls `onPress` twice. Covers manual double-tap counting patterns. |
 | `longPress()` | Calls nearest ancestor `onLongPress`; throws if not found |
 | `typeText(text)` | Calls `onChangeText` prop; throws if not found |
 | `clearText()` | `typeText('')` |
+| `pressKey(key)` | Fires `onKeyPress({ nativeEvent: { key } })` on the nearest ancestor with that handler. Common keys: `'Enter'`, `'Backspace'`, `'Tab'`. Throws if no handler found. |
 | `focus()` | Calls `onFocus` prop or `stateNode.focus()` |
 | `blur()` | Calls `onBlur` prop or `stateNode.blur()` |
 | `submitEditing()` | Calls `onSubmitEditing` prop |
 | `scrollTo(offset)` | Scrolls element vertically to `offset` px |
 | `scrollToX(offset)` | Scrolls element horizontally to `offset` px (FlatList or ScrollView) |
 | `swipe(direction, distance?)` | Fires a PanResponder gesture sequence (grant → 10 move steps → release). `direction`: `'left' \| 'right' \| 'up' \| 'down'`; `distance` defaults to 100 px. Throws if no `onResponderGrant` handler is found in the ancestor chain. |
+| `dragTo(target)` | Measures frames of source + target via `getFrame()`, computes center-to-center dx/dy, then fires the same PanResponder sequence as `swipe()`. Useful for sortable lists, Kanban boards, etc. |
+| `check()` | Calls `onValueChange(true)` on the nearest ancestor with that handler. For Switch / Checkbox / custom toggles. Throws if not found. |
+| `uncheck()` | Calls `onValueChange(false)`. Throws if no handler found. |
+| `isChecked()` | Returns `!!memoizedProps.value` — reads the controlled boolean value of a Switch or similar. |
+| `selectOption(value)` | Calls `onValueChange(value)` on the nearest ancestor with that handler. Works with any component that uses `onValueChange` (custom pickers, segmented controls, etc.). Throws if not found. |
 | `text()` | Concatenates all HostText (fiber tag-6) descendants |
+| `inputValue()` | Returns `memoizedProps.value ?? memoizedProps.defaultValue ?? ''` — reads the controlled/uncontrolled value of a TextInput without relying on HostText children |
 | `exists()` | Re-queries by `testID`; always false if no testID |
+| `prop(name)` | Returns a single named prop from `memoizedProps` — sugar over `(await el.props())[name]` |
 | `props()` | Returns serializable memoizedProps + `accessibilityState` |
 | `isEnabled()` | `false` if `disabled` or `accessibilityState.disabled` |
 | `isVisible()` | Delegates to `exists()` |
@@ -122,6 +133,8 @@ Key methods on `AppSession`:
 | `getFrame()` | `{ x, y, width, height }` via `stateNode.measure()` |
 
 ### expect matchers
+
+When passed a primitive/object, `expect()` returns a **sync** `Assertion`:
 
 ```ts
 expect(value).toBe(expected)                      // Object.is equality
@@ -142,6 +155,18 @@ expect(await el.props()).toHaveAccessibilityRole(role)
 expect(value).not.<matcher>()                      // negation
 ```
 
+When passed an `Element`, `expect()` returns an **async auto-waiting** `AsyncElementExpect` that polls at 250 ms intervals until the assertion passes or the timeout (default 4 000 ms) expires:
+
+```ts
+await expect(element).toHaveText(expected)         // string or RegExp; polls until text matches
+await expect(element).toHaveValue(expected)        // polls until inputValue() matches
+await expect(element).toBeVisible()                // polls until isVisible() is true
+await expect(element).toBeEnabled()               // polls until isEnabled() is true
+await expect(element).not.toHaveText('wrong')      // negation; passes as soon as condition is false
+// All async matchers accept an optional opts: { timeout?: number }
+await expect(element).toHaveText('Done', { timeout: 8_000 })
+```
+
 Failures throw `AssertionError`, which the runner catches and marks as a test failure.
 
 ### `__testBridge__` bridge surface
@@ -153,15 +178,21 @@ The IIFE installs `globalThis.__testBridge__` with these methods. Extend `inject
 | `findByTestID(testID)` | `NodeDescriptor \| null` |
 | `findByComponent(name, props?)` | `NodeDescriptor[]` |
 | `findByAccessibilityLabel(label, exact)` | `NodeDescriptor[]` — `exact=true` strict equality, `exact=false` substring |
+| `findByAccessibilityRole(role)` | `NodeDescriptor[]` — matches `memoizedProps.accessibilityRole`; HOC-deduped |
+| `findByPlaceholder(placeholder, exact)` | `NodeDescriptor[]` — matches `memoizedProps.placeholder`; skips HostComponents; HOC-deduped |
 | `findByTestIDWithin(rootNodeId, testID)` | `NodeDescriptor \| null` — scoped to subtree of `rootNodeId` |
 | `findByComponentWithin(rootNodeId, name, props?)` | `NodeDescriptor[]` — scoped to subtree of `rootNodeId` |
 | `findByAccessibilityLabelWithin(rootNodeId, label, exact)` | `NodeDescriptor[]` — scoped to subtree of `rootNodeId` |
+| `findByAccessibilityRoleWithin(rootNodeId, role)` | `NodeDescriptor[]` — scoped to subtree of `rootNodeId` |
+| `findByPlaceholderWithin(rootNodeId, placeholder, exact)` | `NodeDescriptor[]` — scoped to subtree of `rootNodeId` |
 | `tap(nodeId)` | `boolean` |
+| `doubleTap(nodeId)` | `boolean` — fires `onDoublePress`/`onDoubleTap` if found, else `onPress` twice |
 | `longPress(nodeId)` | `boolean` |
 | `typeText(nodeId, text)` | `boolean` |
 | `focus(nodeId)` / `blur(nodeId)` | `boolean` |
 | `submitEditing(nodeId)` | `boolean` |
 | `getText(nodeId)` | `string` |
+| `getInputValue(nodeId)` | `string` — reads `memoizedProps.value ?? defaultValue ?? ''` |
 | `exists(testID)` | `boolean` |
 | `isEnabled(nodeId)` / `isFocused(nodeId)` | `boolean` |
 | `getFrame(nodeId)` | `Promise<{x,y,width,height} \| null>` |
@@ -169,6 +200,11 @@ The IIFE installs `globalThis.__testBridge__` with these methods. Extend `inject
 | `scrollElement(nodeId, offset)` | `boolean` (vertical, scoped to node) |
 | `scrollElementToX(nodeId, xOffset)` | `boolean` (horizontal, scoped to node) |
 | `swipe(nodeId, direction, distance)` | `boolean` — fires PanResponder grant/move/release lifecycle |
+| `dragFromTo(nodeId, dx, dy)` | `boolean \| string` — same PanResponder sequence as `swipe()` but with explicit dx/dy |
+| `pressKey(nodeId, key)` | `boolean` — fires `onKeyPress({ nativeEvent: { key } })` on nearest ancestor handler |
+| `isChecked(nodeId)` | `boolean` — reads `!!memoizedProps.value` |
+| `setChecked(nodeId, checked)` | `boolean` — calls `onValueChange(checked)` on nearest ancestor |
+| `selectOption(nodeId, value)` | `boolean` — calls `onValueChange(value)` on nearest ancestor |
 | `dismissKeyboard()` | `boolean` |
 | `getTree(maxDepth?)` | serialized tree — useful for debugging testIDs |
 

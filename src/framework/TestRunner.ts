@@ -130,7 +130,14 @@ function currentSuite(): Suite {
 export class TestRunner {
   constructor(private config: E2EConfig) {}
 
-  async run(specFiles: string[]): Promise<void> {
+  async run(specFilesOrDir: string | string[]): Promise<void> {
+    const specFiles = typeof specFilesOrDir === 'string'
+      ? fs.readdirSync(specFilesOrDir)
+          .filter(f => /\.spec\.[tj]s$/.test(f))
+          .sort()
+          .map(f => path.join(specFilesOrDir, f))
+      : specFilesOrDir;
+
     for (const file of specFiles) {
       await import(file);
     }
@@ -145,6 +152,7 @@ export class TestRunner {
     const label = this.config.suiteName ?? 'E2E';
     console.log(`\n🧪  ${label}\n`);
 
+    const runStart = Date.now();
     await session.start();
 
     try {
@@ -244,7 +252,7 @@ export class TestRunner {
 
     this.writeResults(results, runDir);
     this.writeJUnit(results, runDir);
-    this.printSummary(results);
+    this.printSummary(results, Date.now() - runStart);
 
     const failures = results.filter(r => r.status === 'fail').length;
     if (failures > 0) process.exit(1);
@@ -298,7 +306,7 @@ export class TestRunner {
     console.log(`  JUnit XML written to ${file}`);
   }
 
-  private printSummary(results: TestResult[]): void {
+  private printSummary(results: TestResult[], elapsedMs: number): void {
     const pass = results.filter(r => r.status === 'pass').length;
     const fail = results.filter(r => r.status === 'fail').length;
     const skip = results.filter(r => r.status === 'skip').length;
@@ -310,11 +318,21 @@ export class TestRunner {
     if (skip > 0) parts.push(yellow(`${skip} skipped`));
     parts.push(`${total} total`);
 
-    console.log(`\n  ${parts.join(', ')}\n`);
+    console.log(`\n  ${parts.join(', ')} ${dim(`in ${formatDuration(elapsedMs)}`)}\n`);
   }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
 
 async function runWithRetry(
   fn: TestFn,

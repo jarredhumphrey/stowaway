@@ -3,7 +3,9 @@ export type Selector =
   | { component: string; props?: Record<string, unknown> }
   | { text: string; exact?: boolean }
   | { text: RegExp }
-  | { accessibilityLabel: string; exact?: boolean };
+  | { accessibilityLabel: string; exact?: boolean }
+  | { accessibilityRole: string }
+  | { placeholder: string; exact?: boolean };
 
 // ── Global expression builders ────────────────────────────────────────────────
 // Generate a JS expression (evaluated inside Hermes) that returns NodeDescriptor|null.
@@ -20,6 +22,15 @@ export function selectorToExpression(selector: Selector): string {
     const s = selector as { accessibilityLabel: string; exact?: boolean };
     const exact = s.exact !== false;
     return `(function() { var r = __testBridge__.findByAccessibilityLabel(${JSON.stringify(s.accessibilityLabel)}, ${exact}); return r.length ? r[0] : null; })()`;
+  }
+  if ('accessibilityRole' in selector) {
+    const s = selector as { accessibilityRole: string };
+    return `(function() { var r = __testBridge__.findByAccessibilityRole(${JSON.stringify(s.accessibilityRole)}); return r.length ? r[0] : null; })()`;
+  }
+  if ('placeholder' in selector) {
+    const s = selector as { placeholder: string; exact?: boolean };
+    const exact = s.exact !== false;
+    return `(function() { var r = __testBridge__.findByPlaceholder(${JSON.stringify(s.placeholder)}, ${exact}); return r.length ? r[0] : null; })()`;
   }
   const ts = selector as { text: string | RegExp; exact?: boolean };
   if (ts.text instanceof RegExp) {
@@ -66,6 +77,15 @@ export function selectorToAllExpression(selector: Selector): string {
     const exact = s.exact !== false;
     return `__testBridge__.findByAccessibilityLabel(${JSON.stringify(s.accessibilityLabel)}, ${exact})`;
   }
+  if ('accessibilityRole' in selector) {
+    const s = selector as { accessibilityRole: string };
+    return `__testBridge__.findByAccessibilityRole(${JSON.stringify(s.accessibilityRole)})`;
+  }
+  if ('placeholder' in selector) {
+    const s = selector as { placeholder: string; exact?: boolean };
+    const exact = s.exact !== false;
+    return `__testBridge__.findByPlaceholder(${JSON.stringify(s.placeholder)}, ${exact})`;
+  }
   const ts = selector as { text: string | RegExp; exact?: boolean };
   if (ts.text instanceof RegExp) {
     return `(function() {
@@ -106,6 +126,15 @@ export function selectorToExpressionWithin(nodeId: number, selector: Selector): 
     const s = selector as { accessibilityLabel: string; exact?: boolean };
     const exact = s.exact !== false;
     return `(function() { var r = __testBridge__.findByAccessibilityLabelWithin(${nodeId}, ${JSON.stringify(s.accessibilityLabel)}, ${exact}); return r.length ? r[0] : null; })()`;
+  }
+  if ('accessibilityRole' in selector) {
+    const s = selector as { accessibilityRole: string };
+    return `(function() { var r = __testBridge__.findByAccessibilityRoleWithin(${nodeId}, ${JSON.stringify(s.accessibilityRole)}); return r.length ? r[0] : null; })()`;
+  }
+  if ('placeholder' in selector) {
+    const s = selector as { placeholder: string; exact?: boolean };
+    const exact = s.exact !== false;
+    return `(function() { var r = __testBridge__.findByPlaceholderWithin(${nodeId}, ${JSON.stringify(s.placeholder)}, ${exact}); return r.length ? r[0] : null; })()`;
   }
   const ts = selector as { text: string | RegExp; exact?: boolean };
   if (ts.text instanceof RegExp) {
@@ -149,6 +178,15 @@ export function selectorToAllExpressionWithin(nodeId: number, selector: Selector
     const s = selector as { accessibilityLabel: string; exact?: boolean };
     const exact = s.exact !== false;
     return `__testBridge__.findByAccessibilityLabelWithin(${nodeId}, ${JSON.stringify(s.accessibilityLabel)}, ${exact})`;
+  }
+  if ('accessibilityRole' in selector) {
+    const s = selector as { accessibilityRole: string };
+    return `__testBridge__.findByAccessibilityRoleWithin(${nodeId}, ${JSON.stringify(s.accessibilityRole)})`;
+  }
+  if ('placeholder' in selector) {
+    const s = selector as { placeholder: string; exact?: boolean };
+    const exact = s.exact !== false;
+    return `__testBridge__.findByPlaceholderWithin(${nodeId}, ${JSON.stringify(s.placeholder)}, ${exact})`;
   }
   const ts = selector as { text: string | RegExp; exact?: boolean };
   if (ts.text instanceof RegExp) {

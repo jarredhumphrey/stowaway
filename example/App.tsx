@@ -6,8 +6,9 @@ import { ListScreen } from './src/screens/ListScreen';
 import { HorizontalScrollScreen } from './src/screens/HorizontalScrollScreen';
 import { FormScreen } from './src/screens/FormScreen';
 import { NetworkScreen } from './src/screens/NetworkScreen';
+import { GesturesScreen } from './src/screens/GesturesScreen';
 
-type TabId = 'buttons' | 'lists' | 'scroll' | 'form' | 'network';
+type TabId = 'buttons' | 'lists' | 'scroll' | 'form' | 'network' | 'gestures';
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'buttons', label: 'Buttons' },
@@ -15,6 +16,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'scroll', label: 'Scroll' },
   { id: 'form', label: 'Form' },
   { id: 'network', label: 'Network' },
+  { id: 'gestures', label: 'Gestures' },
 ];
 
 export default function App() {
@@ -30,6 +32,7 @@ export default function App() {
         {activeTab === 'scroll' && <HorizontalScrollScreen />}
         {activeTab === 'form' && <FormScreen />}
         {activeTab === 'network' && <NetworkScreen />}
+        {activeTab === 'gestures' && <GesturesScreen />}
       </View>
 
       <View style={styles.tabBar} testID="tab-bar">

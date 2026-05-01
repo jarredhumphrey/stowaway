@@ -10,15 +10,48 @@ import {
 } from 'react-native';
 
 type Plan = 'free' | 'pro' | 'team';
+type Theme = 'light' | 'dark' | 'system';
+
+function SegmentedPicker({
+  testID,
+  options,
+  value,
+  onValueChange,
+}: {
+  testID: string;
+  options: string[];
+  value: string;
+  onValueChange: (v: string) => void;
+}) {
+  return (
+    // onValueChange lives in memoizedProps so selectOption() can find it via the bridge
+    <View testID={testID} style={styles.segmented} {...({ onValueChange } as any)}>
+      {options.map(opt => (
+        <TouchableOpacity
+          key={opt}
+          style={[styles.segment, value === opt && styles.segmentActive]}
+          onPress={() => onValueChange(opt)}
+          accessibilityState={{ selected: value === opt }}
+        >
+          <Text style={[styles.segmentText, value === opt && styles.segmentTextActive]}>
+            {opt.charAt(0).toUpperCase() + opt.slice(1)}
+          </Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
 
 export function FormScreen() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [plan, setPlan] = useState<Plan>('free');
+  const [theme, setTheme] = useState<Theme>('system');
   const [notifications, setNotifications] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [nameFocused, setNameFocused] = useState(false);
   const [nameSubmitted, setNameSubmitted] = useState(false);
+  const [lastKey, setLastKey] = useState('');
 
   function handleSubmit() {
     setSubmitted(true);
@@ -28,8 +61,10 @@ export function FormScreen() {
     setName('');
     setEmail('');
     setPlan('free');
+    setTheme('system');
     setNotifications(false);
     setSubmitted(false);
+    setLastKey('');
   }
 
   return (
@@ -49,6 +84,7 @@ export function FormScreen() {
         style={styles.input}
         value={name}
         onChangeText={setName}
+        onKeyPress={({ nativeEvent }) => setLastKey(nativeEvent.key)}
         placeholder="Enter your name"
         placeholderTextColor="#c7c7cc"
         onFocus={() => setNameFocused(true)}
@@ -61,6 +97,9 @@ export function FormScreen() {
       )}
       {nameSubmitted && (
         <Text testID="name-submitted" style={styles.focusHint}>Name submitted</Text>
+      )}
+      {lastKey !== '' && (
+        <Text testID="last-key-pressed" style={styles.focusHint}>Last key: {lastKey}</Text>
       )}
 
       <Text style={styles.label}>Email</Text>
@@ -93,6 +132,15 @@ export function FormScreen() {
         ))}
       </View>
 
+      {/* ── Theme picker (demos selectOption) ───────────────────── */}
+      <Text style={styles.label}>Theme</Text>
+      <SegmentedPicker
+        testID="picker-theme"
+        options={['light', 'dark', 'system']}
+        value={theme}
+        onValueChange={v => setTheme(v as Theme)}
+      />
+
       {/* ── Toggle ──────────────────────────────────────────────── */}
       <View style={styles.switchRow}>
         <Text style={styles.switchLabel}>Notifications</Text>
@@ -106,6 +154,7 @@ export function FormScreen() {
       {/* ── Summary ─────────────────────────────────────────────── */}
       <View style={styles.summary} testID="form-summary">
         <Text style={styles.summaryText} testID="summary-plan">Plan: {plan}</Text>
+        <Text style={styles.summaryText} testID="summary-theme">Theme: {theme}</Text>
         <Text style={styles.summaryText} testID="summary-notifications">
           Notifications: {notifications ? 'on' : 'off'}
         </Text>
@@ -163,6 +212,18 @@ const styles = StyleSheet.create({
   planBtnActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
   planBtnText: { fontSize: 14, fontWeight: '600', color: '#8e8e93' },
   planBtnTextActive: { color: '#fff' },
+  segmented: { flexDirection: 'row', gap: 8, marginBottom: 24 },
+  segment: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: '#c6c6c8',
+    alignItems: 'center',
+  },
+  segmentActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
+  segmentText: { fontSize: 13, fontWeight: '600', color: '#8e8e93' },
+  segmentTextActive: { color: '#fff' },
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',
