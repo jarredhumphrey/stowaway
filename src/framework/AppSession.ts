@@ -1,4 +1,5 @@
 import { Device } from './Device';
+import type { StatusBarOptions } from './Device';
 import { HermesSession } from './HermesSession';
 import { Element, type NodeDescriptor } from './Element';
 import { BRIDGE_INJECTOR_SCRIPT } from '../bridge/injector';
@@ -13,6 +14,7 @@ import {
 } from './selectors';
 
 export type { Selector };
+export type { StatusBarOptions };
 
 function selectorStep(sel: Selector): string {
   if ('testID' in sel) return sel.testID;
@@ -64,6 +66,8 @@ export class AppSession {
   private suiteMocks: SerializedMock[] = [];
   private inSuiteScope = false;
   private resultsDir: string;
+  private _currentRecordingPath: string | null = null;
+  private _slowModeDelay = 0;
 
   constructor(private config: E2EConfig) {
     this.device = new Device(config);
@@ -269,14 +273,14 @@ export class AppSession {
       throw new Error(`find() — element not found: ${JSON.stringify(selector)}`);
     }
     this.log(`find: ${selectorStep(selector)}`);
-    return new Element(descriptor, this.hermes, this.config.verbose);
+    return new Element(descriptor, this.hermes, this.config.verbose, this._slowModeDelay);
   }
 
   async findAll(selector: Selector): Promise<Element[]> {
     const expr = selectorToAllExpression(selector);
     const descriptors = await this.hermes.evaluate<NodeDescriptor[]>(expr);
     this.log(`findAll: ${selectorStep(selector)} (${descriptors.length} found)`);
-    return descriptors.map(d => new Element(d, this.hermes, this.config.verbose));
+    return descriptors.map(d => new Element(d, this.hermes, this.config.verbose, this._slowModeDelay));
   }
 
   async waitForElement(
@@ -296,7 +300,7 @@ export class AppSession {
       const descriptor = await this.hermes.evaluate<NodeDescriptor | null>(expr);
       if (descriptor) {
         this.log(`waitFor: ${selectorStep(selector)}`);
-        return new Element(descriptor, this.hermes, this.config.verbose);
+        return new Element(descriptor, this.hermes, this.config.verbose, this._slowModeDelay);
       }
       await sleep(interval);
     }
@@ -377,7 +381,7 @@ export class AppSession {
 
     const tryFind = async (): Promise<Element | null> => {
       const descriptor = await this.hermes.evaluate<NodeDescriptor | null>(expr);
-      return descriptor ? new Element(descriptor, this.hermes, this.config.verbose) : null;
+      return descriptor ? new Element(descriptor, this.hermes, this.config.verbose, this._slowModeDelay) : null;
     };
 
     const initial = await tryFind();
@@ -474,6 +478,60 @@ export class AppSession {
     const filePath = `${this.resultsDir}/${name}-${Date.now()}.png`;
     await this.device.screenshot(filePath);
     return filePath;
+  }
+
+  // ── Slow mode (used by slow-replay) ──────────────────────────────────────────
+
+  enableSlowMode(delay: number): void {
+    this._slowModeDelay = delay;
+  }
+
+  disableSlowMode(): void {
+    this._slowModeDelay = 0;
+  }
+
+  // ── Screen recording ──────────────────────────────────────────────────────────
+
+  async startRecording(name = 'recording'): Promise<void> {
+    const { mkdirSync } = await import('fs');
+    mkdirSync(this.resultsDir, { recursive: true });
+    const filePath = `${this.resultsDir}/${name}-${Date.now()}.mp4`;
+    this._currentRecordingPath = filePath;
+    await this.device.startRecording(filePath);
+  }
+
+  async stopRecording(): Promise<string> {
+    if (!this._currentRecordingPath) throw new Error('No recording in progress');
+    await this.device.stopRecording();
+    const path = this._currentRecordingPath;
+    this._currentRecordingPath = null;
+    return path;
+  }
+
+  // ── Push notifications ────────────────────────────────────────────────────────
+
+  async pushNotification(payload: object): Promise<void> {
+    await this.device.pushNotification(this.config.bundleId, payload);
+  }
+
+  // ── Status bar ────────────────────────────────────────────────────────────────
+
+  async setStatusBar(opts: StatusBarOptions): Promise<void> {
+    await this.device.setStatusBar(opts);
+  }
+
+  async resetStatusBar(): Promise<void> {
+    await this.device.resetStatusBar();
+  }
+
+  // ── Clipboard ─────────────────────────────────────────────────────────────────
+
+  async setClipboard(text: string): Promise<void> {
+    await this.device.setClipboard(text);
+  }
+
+  async getClipboard(): Promise<string> {
+    return this.device.getClipboard();
   }
 
   // ── Animation control ─────────────────────────────────────────────────────────

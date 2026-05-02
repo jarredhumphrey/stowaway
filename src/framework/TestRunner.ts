@@ -39,6 +39,7 @@ interface TestResult {
   durationMs: number;
   error?: string;
   screenshotPath?: string;
+  replayVideoPath?: string;
 }
 
 // ── Registration API ─────────────────────────────────────────────────────────
@@ -208,6 +209,7 @@ export class TestRunner {
           let status: 'pass' | 'fail' = 'pass';
           let errorMsg: string | undefined;
           let screenshotPath: string | undefined;
+          let replayVideoPath: string | undefined;
 
           const timeoutMs = test.timeout ?? this.config.defaultTimeout;
           const retries = test.retries ?? 0;
@@ -230,15 +232,42 @@ export class TestRunner {
             } catch { /* non-fatal — screenshot is best-effort */ }
           }
 
+          if (status === 'fail' && this.config.slowReplay) {
+            const replaySlug = `replay-${suite.name}-${test.name}`.replace(/[^a-z0-9]/gi, '-');
+            console.log(`    ${dim('⏺  recording slow replay...')}`);
+            try {
+              await session.reset();
+              await session.reapplySuiteMocks();
+              session.enableSlowMode(this.config.slowReplayDelay);
+              await session.startRecording(replaySlug);
+              // Give the recording process time to start capturing before any interactions fire.
+              await new Promise(r => setTimeout(r, 500));
+              for (const hook of suite.beforeEachHooks) {
+                try { await hook(session); } catch {}
+              }
+              try {
+                await runWithRetry(test.fn, session, timeoutMs * 2, 0);
+              } catch {}
+              replayVideoPath = await session.stopRecording();
+            } catch (replayErr) {
+              const replayMsg = replayErr instanceof Error ? replayErr.message : String(replayErr);
+              console.log(`      ${dim('slow replay failed: ' + replayMsg)}`);
+              try { await session.stopRecording(); } catch {}
+            } finally {
+              session.disableSlowMode();
+            }
+          }
+
           const durationMs = Date.now() - start;
 
-          results.push({ suite: suite.name, test: test.name, status, durationMs, error: errorMsg, screenshotPath });
+          results.push({ suite: suite.name, test: test.name, status, durationMs, error: errorMsg, screenshotPath, replayVideoPath });
 
           const icon = status === 'pass' ? green('✓') : red('✗');
           const dur = dim(`(${durationMs}ms)`);
           console.log(`    ${icon} ${test.name} ${dur}`);
           if (errorMsg) console.log(`      ${red(errorMsg)}`);
           if (screenshotPath) console.log(`      ${dim('screenshot: ' + screenshotPath)}`);
+          if (replayVideoPath) console.log(`      ${dim('replay:     ' + replayVideoPath)}`);
 
           for (const hook of suite.afterEachHooks) {
             try { await hook(session); } catch { /* non-fatal */ }

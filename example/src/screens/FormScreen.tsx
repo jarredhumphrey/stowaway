@@ -52,6 +52,9 @@ export function FormScreen() {
   const [nameFocused, setNameFocused] = useState(false);
   const [nameSubmitted, setNameSubmitted] = useState(false);
   const [lastKey, setLastKey] = useState('');
+  const [pickedDate, setPickedDate] = useState(new Date('2025-01-01'));
+  const [sliderValue, setSliderValueState] = useState(0);
+  const [slidingDone, setSlidingDone] = useState(false);
 
   function handleSubmit() {
     setSubmitted(true);
@@ -150,6 +153,29 @@ export function FormScreen() {
           onValueChange={setNotifications}
         />
       </View>
+
+      {/* ── Date picker (demos setDate) ─────────────────────────── */}
+      <Text style={styles.label}>Date</Text>
+      <View
+        testID="date-picker"
+        style={styles.datePicker}
+        {...({ onDateChange: setPickedDate } as any)}
+      >
+        <Text style={styles.datePickerText}>{pickedDate.toDateString()}</Text>
+      </View>
+      <Text testID="date-value" style={styles.dateValue}>{pickedDate.toDateString()}</Text>
+
+      {/* ── Slider (demos slideToValue) ──────────────────────────── */}
+      <Text style={styles.label}>Slider</Text>
+      <View
+        testID="slider"
+        style={styles.sliderTrack}
+        {...({ onValueChange: setSliderValueState, onSlidingComplete: () => setSlidingDone(true) } as any)}
+      >
+        <Text style={styles.datePickerText}>{sliderValue}</Text>
+      </View>
+      <Text testID="slider-value" style={styles.dateValue}>Value: {sliderValue}</Text>
+      {slidingDone && <Text testID="sliding-complete" style={styles.dateValue}>Sliding complete</Text>}
 
       {/* ── Summary ─────────────────────────────────────────────── */}
       <View style={styles.summary} testID="form-summary">
@@ -250,4 +276,22 @@ const styles = StyleSheet.create({
   clearBtn: { alignItems: 'center', paddingVertical: 12 },
   clearText: { color: '#FF3B30', fontSize: 16 },
   focusHint: { fontSize: 12, color: '#007AFF', marginBottom: 8, marginTop: -12 },
+  datePicker: {
+    borderWidth: 1.5,
+    borderColor: '#c6c6c8',
+    borderRadius: 10,
+    padding: 14,
+    marginBottom: 8,
+    alignItems: 'center' as const,
+  },
+  datePickerText: { fontSize: 16, color: '#1c1c1e' },
+  dateValue: { fontSize: 13, color: '#8e8e93', marginBottom: 20 },
+  sliderTrack: {
+    borderWidth: 1.5,
+    borderColor: '#c6c6c8',
+    borderRadius: 10,
+    padding: 14,
+    marginBottom: 8,
+    alignItems: 'center' as const,
+  },
 });

@@ -1,9 +1,22 @@
 import { execFile as execFileCb } from 'child_process';
+import type { ChildProcess } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
 import type { E2EConfig } from '../config';
 
 const execFile = promisify(execFileCb);
+
+export interface StatusBarOptions {
+  time?: string;
+  batteryLevel?: number;
+  batteryState?: 'charging' | 'discharging' | 'notCharging';
+  wifiMode?: 'active' | 'searching' | 'failed' | 'inactive';
+  wifiBars?: number;
+  cellularMode?: 'active' | 'searching' | 'failed' | 'inactive';
+  cellularBars?: number;
+  dataNetwork?: 'wifi' | '3g' | '4g' | 'lte' | 'lte-a' | '5g';
+  operatorName?: string;
+}
 
 interface SimctlDevice {
   udid: string;
@@ -14,6 +27,9 @@ interface SimctlDevice {
 export class Device {
   private udid: string | null = null;
   private serial: string | null = null;
+  private _recordingProcess: ChildProcess | null = null;
+  private _recordingPath: string | null = null;
+  private _androidRecordingDevicePath: string | null = null;
 
   constructor(private config: E2EConfig) {}
 
@@ -184,6 +200,105 @@ export class Device {
         `android.permission.${service.toUpperCase()}`,
       ));
     }
+  }
+
+  // ── Screen recording ─────────────────────────────────────────────────────
+
+  async startRecording(path: string): Promise<void> {
+    if (this._recordingProcess) throw new Error('Recording already in progress');
+    const { spawn } = await import('child_process');
+    if (this.config.platform === 'ios') {
+      const udid = this.udid ?? (await this.getBootedSimulator());
+      this._recordingProcess = spawn('xcrun', ['simctl', 'io', udid, 'recordVideo', '--codec', 'h264', path]);
+    } else {
+      this._androidRecordingDevicePath = '/sdcard/stowaway_recording.mp4';
+      this._recordingProcess = spawn('adb', this.adb('shell', 'screenrecord', this._androidRecordingDevicePath));
+    }
+    this._recordingPath = path;
+  }
+
+  async stopRecording(): Promise<void> {
+    if (!this._recordingProcess) throw new Error('No recording in progress');
+    this._recordingProcess.kill('SIGINT');
+    await new Promise<void>(resolve => {
+      this._recordingProcess!.once('close', () => resolve());
+      setTimeout(() => resolve(), 3_000);
+    });
+    this._recordingProcess = null;
+    if (this.config.platform === 'android' && this._androidRecordingDevicePath && this._recordingPath) {
+      await new Promise<void>(r => setTimeout(r, 1_000));
+      await execFile('adb', this.adb('pull', this._androidRecordingDevicePath, this._recordingPath));
+      await execFile('adb', this.adb('shell', 'rm', '-f', this._androidRecordingDevicePath));
+      this._androidRecordingDevicePath = null;
+    }
+    this._recordingPath = null;
+  }
+
+  // ── Push notifications ────────────────────────────────────────────────────
+
+  async pushNotification(bundleId: string, payload: object): Promise<void> {
+    if (this.config.platform !== 'ios') {
+      throw new Error('pushNotification() is only supported on iOS (xcrun simctl push)');
+    }
+    const udid = this.udid ?? (await this.getBootedSimulator());
+    const { writeFileSync, unlinkSync } = await import('fs');
+    const { tmpdir } = await import('os');
+    const { join } = await import('path');
+    const tmpPath = join(tmpdir(), `stowaway-push-${Date.now()}.json`);
+    writeFileSync(tmpPath, JSON.stringify(payload));
+    try {
+      await execFile('xcrun', ['simctl', 'push', udid, bundleId, tmpPath]);
+    } finally {
+      try { unlinkSync(tmpPath); } catch {}
+    }
+  }
+
+  // ── Status bar ────────────────────────────────────────────────────────────
+
+  async setStatusBar(opts: StatusBarOptions): Promise<void> {
+    if (this.config.platform !== 'ios') return;
+    const udid = this.udid ?? (await this.getBootedSimulator());
+    const args = ['simctl', 'status_bar', udid, 'override'];
+    if (opts.time !== undefined)         args.push('--time', opts.time);
+    if (opts.batteryLevel !== undefined) args.push('--batteryLevel', String(opts.batteryLevel));
+    if (opts.batteryState !== undefined) args.push('--batteryState', opts.batteryState);
+    if (opts.wifiMode !== undefined)     args.push('--wifiMode', opts.wifiMode);
+    if (opts.wifiBars !== undefined)     args.push('--wifiBars', String(opts.wifiBars));
+    if (opts.cellularMode !== undefined) args.push('--cellularMode', opts.cellularMode);
+    if (opts.cellularBars !== undefined) args.push('--cellularBars', String(opts.cellularBars));
+    if (opts.dataNetwork !== undefined)  args.push('--dataNetwork', opts.dataNetwork);
+    if (opts.operatorName !== undefined) args.push('--operatorName', opts.operatorName);
+    await execFile('xcrun', args);
+  }
+
+  async resetStatusBar(): Promise<void> {
+    if (this.config.platform !== 'ios') return;
+    const udid = this.udid ?? (await this.getBootedSimulator());
+    await execFile('xcrun', ['simctl', 'status_bar', udid, 'clear']);
+  }
+
+  // ── Clipboard ─────────────────────────────────────────────────────────────
+
+  async setClipboard(text: string): Promise<void> {
+    if (this.config.platform !== 'ios') {
+      throw new Error('setClipboard() is not supported on Android');
+    }
+    const { spawn } = await import('child_process');
+    await new Promise<void>((resolve, reject) => {
+      const proc = spawn('pbcopy');
+      proc.stdin.write(text, 'utf8');
+      proc.stdin.end();
+      proc.once('close', code => code === 0 ? resolve() : reject(new Error(`pbcopy exited with code ${code}`)));
+      proc.once('error', reject);
+    });
+  }
+
+  async getClipboard(): Promise<string> {
+    if (this.config.platform !== 'ios') {
+      throw new Error('getClipboard() is not supported on Android');
+    }
+    const { stdout } = await execFile('pbpaste');
+    return stdout;
   }
 
   // Prepend -s <serial> when we know which device to target.

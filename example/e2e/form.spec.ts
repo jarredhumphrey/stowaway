@@ -171,4 +171,21 @@ describe('Form — new APIs', () => {
     await input.focus();
     await expect(input).toHaveFocus();
   });
+
+  it('setDate updates the date picker', async (app: AppSession) => {
+    await goToForm(app);
+    const picker = await app.find({ testID: 'date-picker' });
+    await picker.setDate(new Date(2025, 5, 15));
+    const value = await app.find({ testID: 'date-value' });
+    expect(await value.text()).toContain('Jun 15 2025');
+  });
+
+  it('slideToValue updates the slider and fires onSlidingComplete', async (app: AppSession) => {
+    await goToForm(app);
+    const slider = await app.find({ testID: 'slider' });
+    await slider.slideToValue(42);
+    const value = await app.find({ testID: 'slider-value' });
+    expect(await value.text()).toBe('Value: 42');
+    await app.waitForElement('sliding-complete');
+  });
 });

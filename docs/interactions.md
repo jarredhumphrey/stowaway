@@ -413,6 +413,154 @@ The directory is created automatically if it doesn't exist. Screenshots on failu
 
 ---
 
+## Screen recording
+
+### `app.startRecording(name?)`
+
+Starts a video recording of the device screen. The file is saved to `<TEST_RESULTS_DIR>/<name>-<timestamp>.mp4`. `name` defaults to `'recording'`. On iOS uses `xcrun simctl io recordVideo`; on Android uses `adb screenrecord`.
+
+### `app.stopRecording()`
+
+Stops the recording and returns the file path.
+
+```ts
+await app.startRecording('checkout-flow');
+// ... run your test actions ...
+const videoPath = await app.stopRecording();
+// e.g. "test-results/checkout-flow-1714000000000.mp4"
+```
+
+---
+
+## Push notifications (iOS only)
+
+### `app.pushNotification(payload)`
+
+Delivers a push notification to the app via `xcrun simctl push`. The app must have push notification entitlements and Xcode 11.4+ is required.
+
+`payload` follows the APNS format:
+
+```ts
+await app.pushNotification({
+  aps: {
+    alert: { title: 'New message', body: 'You have a new message' },
+    sound: 'default',
+    badge: 1,
+  },
+  customKey: 'customValue',
+});
+await app.waitForElement('notification-banner');
+```
+
+The app should be backgrounded (or in the foreground with a notification handler) before calling this.
+
+---
+
+## Status bar (iOS only)
+
+### `app.setStatusBar(opts)`
+
+Overrides status bar content via `xcrun simctl status_bar`. Useful for screenshot consistency and visual regression testing. All fields are optional — omit any you don't want to override.
+
+```ts
+await app.setStatusBar({
+  time: '9:41',
+  batteryLevel: 100,
+  batteryState: 'discharging',
+  wifiMode: 'active',
+  wifiBars: 3,
+  cellularMode: 'active',
+  cellularBars: 4,
+  dataNetwork: 'lte',
+  operatorName: 'Carrier',
+});
+```
+
+| Field | Type | Values |
+|---|---|---|
+| `time` | `string` | e.g. `'9:41'` |
+| `batteryLevel` | `number` | `0`–`100` |
+| `batteryState` | `string` | `'charging'` \| `'discharging'` \| `'notCharging'` |
+| `wifiMode` | `string` | `'active'` \| `'searching'` \| `'failed'` \| `'inactive'` |
+| `wifiBars` | `number` | `0`–`3` |
+| `cellularMode` | `string` | `'active'` \| `'searching'` \| `'failed'` \| `'inactive'` |
+| `cellularBars` | `number` | `0`–`4` |
+| `dataNetwork` | `string` | `'wifi'` \| `'3g'` \| `'4g'` \| `'lte'` \| `'lte-a'` \| `'5g'` |
+| `operatorName` | `string` | Any string |
+
+### `app.resetStatusBar()`
+
+Clears all status bar overrides and restores the real values.
+
+```ts
+afterAll(async (app) => {
+  await app.resetStatusBar();
+});
+```
+
+Is a no-op on Android.
+
+---
+
+## Clipboard (iOS only)
+
+Uses the macOS host clipboard, which the Simulator syncs with by default (Simulator › General › Copy and Paste).
+
+### `app.setClipboard(text)`
+
+Writes a string to the clipboard.
+
+```ts
+await app.setClipboard('SUMMER20');
+await (await app.find({ testID: 'btn-paste-code' })).tap();
+const input = await app.find({ testID: 'input-promo' });
+expect(await input.inputValue()).toBe('SUMMER20');
+```
+
+### `app.getClipboard()`
+
+Reads the current clipboard contents as a string.
+
+```ts
+await (await app.find({ testID: 'btn-copy-invite-link' })).tap();
+const link = await app.getClipboard();
+expect(link).toContain('https://myapp.com/invite/');
+```
+
+Both methods throw on Android.
+
+---
+
+## Native component setters
+
+### `element.setDate(date)`
+
+Fires the date handler on the nearest ancestor that has `onDateChange`, `onChange`, or `onConfirm`. Works with `DatePickerIOS`, `@react-native-community/datetimepicker`, and modal-style date pickers.
+
+```ts
+const picker = await app.find({ testID: 'dob-picker' });
+await picker.setDate(new Date('1990-05-15'));
+const display = await app.find({ testID: 'dob-display' });
+expect(await display.text()).toContain('May 15, 1990');
+```
+
+The date is serialized as a timestamp and reconstructed as a `Date` object inside the bridge.
+
+### `element.slideToValue(value)`
+
+Fires `onValueChange(value)` and — if present on the same node — `onSlidingComplete(value)`. Works with `@react-native-community/slider` and any component that exposes these handlers.
+
+```ts
+const slider = await app.find({ testID: 'volume-slider' });
+await slider.slideToValue(0.75);
+const label = await app.find({ testID: 'volume-label' });
+expect(await label.text()).toBe('75%');
+```
+
+Throws if no `onValueChange` is found in the ancestor chain.
+
+---
+
 ## Checking state without interacting
 
 These read-only methods on `Element` are covered in [Querying](./querying.md) but are repeated here for completeness:

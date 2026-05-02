@@ -780,6 +780,48 @@
     return false;
   }
 
+  function setDateValue(nodeId, timestamp) {
+    var date = new Date(timestamp);
+    var fiber = getCurrentFiber(nodeId);
+    if (!fiber) return false;
+    var current = fiber;
+    while (current) {
+      var p = current.memoizedProps;
+      if (p && typeof p.onDateChange === 'function') {
+        try { p.onDateChange(date); return true; } catch (e) {}
+      }
+      if (p && typeof p.onChange === 'function') {
+        try {
+          p.onChange({ type: 'set', nativeEvent: { timestamp: timestamp, utcOffset: 0 } }, date);
+          return true;
+        } catch (e) {}
+      }
+      if (p && typeof p.onConfirm === 'function') {
+        try { p.onConfirm(date); return true; } catch (e) {}
+      }
+      current = current.return;
+    }
+    return false;
+  }
+
+  function setSliderValue(nodeId, value) {
+    var fiber = getCurrentFiber(nodeId);
+    if (!fiber) return false;
+    var current = fiber;
+    while (current) {
+      var p = current.memoizedProps;
+      if (p && typeof p.onValueChange === 'function') {
+        try {
+          p.onValueChange(value);
+          if (typeof p.onSlidingComplete === 'function') p.onSlidingComplete(value);
+          return true;
+        } catch (e) { return false; }
+      }
+      current = current.return;
+    }
+    return false;
+  }
+
   globalThis.__testBridge__ = {
     findByTestID: findByTestID,
     findByComponent: findByComponent,
@@ -816,6 +858,8 @@
     isChecked: isChecked,
     setChecked: setChecked,
     selectOption: selectOption,
+    setDateValue: setDateValue,
+    setSliderValue: setSliderValue,
   };
 
   return true;

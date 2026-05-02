@@ -11,6 +11,10 @@ function selectorLabel(sel: Selector): string {
   return JSON.stringify(sel);
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise(r => setTimeout(r, ms));
+}
+
 export interface NodeDescriptor {
   nodeId: number;
   componentType: string;
@@ -29,6 +33,7 @@ export class Element {
     private descriptor: NodeDescriptor,
     private session: HermesSession,
     private verbose = false,
+    private slowDelay = 0,
   ) {}
 
   get nodeId(): number {
@@ -54,6 +59,7 @@ export class Element {
       );
     }
     this.log(`tap: ${this.label}`);
+    if (this.slowDelay > 0) await sleep(this.slowDelay);
   }
 
   async longPress(): Promise<void> {
@@ -67,6 +73,7 @@ export class Element {
       );
     }
     this.log(`longPress: ${this.label}`);
+    if (this.slowDelay > 0) await sleep(this.slowDelay);
   }
 
   async typeText(text: string): Promise<void> {
@@ -80,6 +87,7 @@ export class Element {
       );
     }
     this.log(`typeText: ${JSON.stringify(text)} → ${this.label}`);
+    if (this.slowDelay > 0) await sleep(this.slowDelay);
   }
 
   async clearText(): Promise<void> {
@@ -93,6 +101,7 @@ export class Element {
       );
     }
     this.log(`clearText: ${this.label}`);
+    if (this.slowDelay > 0) await sleep(this.slowDelay);
   }
 
   async focus(): Promise<void> {
@@ -105,6 +114,7 @@ export class Element {
       );
     }
     this.log(`focus: ${this.label}`);
+    if (this.slowDelay > 0) await sleep(this.slowDelay);
   }
 
   async blur(): Promise<void> {
@@ -117,6 +127,7 @@ export class Element {
       );
     }
     this.log(`blur: ${this.label}`);
+    if (this.slowDelay > 0) await sleep(this.slowDelay);
   }
 
   async submitEditing(): Promise<void> {
@@ -129,6 +140,7 @@ export class Element {
       );
     }
     this.log(`submitEditing: ${this.label}`);
+    if (this.slowDelay > 0) await sleep(this.slowDelay);
   }
 
   async scrollTo(offset: number): Promise<void> {
@@ -141,6 +153,7 @@ export class Element {
       );
     }
     this.log(`scrollTo: ${offset}px on ${this.label}`);
+    if (this.slowDelay > 0) await sleep(this.slowDelay);
   }
 
   async swipe(
@@ -156,6 +169,7 @@ export class Element {
       );
     }
     this.log(`swipe: ${direction} ${distance}px on ${this.label}`);
+    if (this.slowDelay > 0) await sleep(this.slowDelay);
   }
 
   async scrollToX(offset: number): Promise<void> {
@@ -168,6 +182,7 @@ export class Element {
       );
     }
     this.log(`scrollToX: ${offset}px on ${this.label}`);
+    if (this.slowDelay > 0) await sleep(this.slowDelay);
   }
 
   async text(): Promise<string> {
@@ -193,6 +208,7 @@ export class Element {
       );
     }
     this.log(`doubleTap: ${this.label}`);
+    if (this.slowDelay > 0) await sleep(this.slowDelay);
   }
 
   async dragTo(target: Element): Promise<void> {
@@ -206,6 +222,7 @@ export class Element {
       throw new Error(`dragTo() failed on node ${this.descriptor.nodeId}: ${result}`);
     }
     this.log(`dragTo: ${this.label} → ${target.label}`);
+    if (this.slowDelay > 0) await sleep(this.slowDelay);
   }
 
   async exists(): Promise<boolean> {
@@ -251,6 +268,7 @@ export class Element {
       );
     }
     this.log(`pressKey: '${key}' → ${this.label}`);
+    if (this.slowDelay > 0) await sleep(this.slowDelay);
   }
 
   async isChecked(): Promise<boolean> {
@@ -267,6 +285,7 @@ export class Element {
       throw new Error(`check() failed — no onValueChange found on node ${this.descriptor.nodeId}`);
     }
     this.log(`check: ${this.label}`);
+    if (this.slowDelay > 0) await sleep(this.slowDelay);
   }
 
   async uncheck(): Promise<void> {
@@ -277,6 +296,7 @@ export class Element {
       throw new Error(`uncheck() failed — no onValueChange found on node ${this.descriptor.nodeId}`);
     }
     this.log(`uncheck: ${this.label}`);
+    if (this.slowDelay > 0) await sleep(this.slowDelay);
   }
 
   async selectOption(value: string | number | boolean): Promise<void> {
@@ -287,6 +307,33 @@ export class Element {
       throw new Error(`selectOption() failed — no onValueChange found on node ${this.descriptor.nodeId}`);
     }
     this.log(`selectOption: ${JSON.stringify(value)} → ${this.label}`);
+    if (this.slowDelay > 0) await sleep(this.slowDelay);
+  }
+
+  async setDate(date: Date): Promise<void> {
+    const ok = await this.session.evaluate<boolean>(
+      `__testBridge__.setDateValue(${this.descriptor.nodeId}, ${date.getTime()})`,
+    );
+    if (!ok) {
+      throw new Error(
+        `setDate() — no date handler (onDateChange/onChange/onConfirm) found on node ${this.descriptor.nodeId}`,
+      );
+    }
+    this.log(`setDate: ${date.toISOString()} → ${this.label}`);
+    if (this.slowDelay > 0) await sleep(this.slowDelay);
+  }
+
+  async slideToValue(value: number): Promise<void> {
+    const ok = await this.session.evaluate<boolean>(
+      `__testBridge__.setSliderValue(${this.descriptor.nodeId}, ${value})`,
+    );
+    if (!ok) {
+      throw new Error(
+        `slideToValue() — no onValueChange handler found on node ${this.descriptor.nodeId}`,
+      );
+    }
+    this.log(`slideToValue: ${value} → ${this.label}`);
+    if (this.slowDelay > 0) await sleep(this.slowDelay);
   }
 
   async find(selector: Selector): Promise<Element> {
@@ -298,14 +345,14 @@ export class Element {
       );
     }
     this.log(`find: ${selectorLabel(selector)} within ${this.label}`);
-    return new Element(descriptor, this.session, this.verbose);
+    return new Element(descriptor, this.session, this.verbose, this.slowDelay);
   }
 
   async findAll(selector: Selector): Promise<Element[]> {
     const expr = selectorToAllExpressionWithin(this.descriptor.nodeId, selector);
     const descriptors = await this.session.evaluate<NodeDescriptor[]>(expr);
     this.log(`findAll: ${selectorLabel(selector)} within ${this.label} (${descriptors.length} found)`);
-    return descriptors.map(d => new Element(d, this.session, this.verbose));
+    return descriptors.map(d => new Element(d, this.session, this.verbose, this.slowDelay));
   }
 
   async props(): Promise<Record<string, unknown>> {

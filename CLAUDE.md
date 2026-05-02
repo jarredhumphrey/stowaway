@@ -104,6 +104,13 @@ Key methods on `AppSession`:
 | `clock.tick(ms)` | Advances fake time by `ms`, firing all queued callbacks in chronological order |
 | `clock.restore()` | Restores real timers; called automatically on `reset()` (new Hermes context) |
 | `clock.now()` | Returns current fake timestamp |
+| `startRecording(name?)` | Starts video recording; saves to `<testResultsDir>/<name>-<timestamp>.mp4` (both platforms) |
+| `stopRecording()` | Stops recording and returns the file path |
+| `pushNotification(payload)` | iOS only — delivers a push via `xcrun simctl push`; payload follows APNS format |
+| `setStatusBar(opts)` | iOS only — overrides status bar fields (time, battery, wifi, cellular, operator) via `xcrun simctl status_bar`; no-op on Android |
+| `resetStatusBar()` | iOS only — clears all status bar overrides; no-op on Android |
+| `setClipboard(text)` | iOS only — writes to the macOS host clipboard (synced with simulator by default) |
+| `getClipboard()` | iOS only — reads from the macOS host clipboard |
 
 ### Element API
 
@@ -130,6 +137,8 @@ Key methods on `AppSession`:
 | `uncheck()` | Calls `onValueChange(false)`. Throws if no handler found. |
 | `isChecked()` | Returns `!!memoizedProps.value` — reads the controlled boolean value of a Switch or similar. |
 | `selectOption(value)` | Calls `onValueChange(value)` on the nearest ancestor with that handler. Works with any component that uses `onValueChange` (custom pickers, segmented controls, etc.). Throws if not found. |
+| `setDate(date)` | Fires `onDateChange`, `onChange` (with synthetic event), or `onConfirm` on the nearest ancestor. Works with `DatePickerIOS`, `@react-native-community/datetimepicker`, and modal-style pickers. |
+| `slideToValue(value)` | Fires `onValueChange(value)` then `onSlidingComplete(value)` on the nearest ancestor with `onValueChange`. Works with `@react-native-community/slider`. |
 | `text()` | Concatenates all HostText (fiber tag-6) descendants |
 | `inputValue()` | Returns `memoizedProps.value ?? memoizedProps.defaultValue ?? ''` — reads the controlled/uncontrolled value of a TextInput without relying on HostText children |
 | `exists()` | Re-queries by `testID`; always false if no testID |

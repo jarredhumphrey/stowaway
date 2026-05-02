@@ -7,6 +7,8 @@ export interface E2EConfig {
   pollInterval: number;
   suiteName?: string;
   verbose: boolean;
+  slowReplay: boolean;
+  slowReplayDelay: number;
 }
 
 export function loadConfig(): E2EConfig {
@@ -29,6 +31,9 @@ export function loadConfig(): E2EConfig {
     process.env.VERBOSE === '1' ||
     process.env.VERBOSE === 'true';
 
+  const slowReplay =
+    process.env.SLOW_REPLAY === '1' || process.env.SLOW_REPLAY === 'true';
+
   return {
     platform,
     metroPort: Number(process.env.METRO_PORT ?? 8081),
@@ -38,5 +43,7 @@ export function loadConfig(): E2EConfig {
     pollInterval: 250,
     suiteName: process.env.SUITE_NAME,
     verbose,
+    slowReplay,
+    slowReplayDelay: Number(process.env.SLOW_REPLAY_DELAY ?? 800),
   };
 }
