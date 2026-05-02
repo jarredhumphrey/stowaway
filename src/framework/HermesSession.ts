@@ -2,6 +2,7 @@ import type { E2EConfig } from '../config';
 
 interface PageDescriptor {
   id: string;
+  title?: string;
   webSocketDebuggerUrl: string;
 }
 
@@ -21,11 +22,9 @@ export class HermesSession {
 
   constructor(private config: E2EConfig) {}
 
-  async connect(): Promise<void> {
-    const descriptor = await this.waitForMetroTarget();
-    await this.openSocket(descriptor.webSocketDebuggerUrl);
+  async connect(webSocketDebuggerUrl: string): Promise<void> {
+    await this.openSocket(webSocketDebuggerUrl);
     await this.send('Runtime.enable', {});
-
     // Wait briefly for executionContextCreated event; fall back gracefully.
     await new Promise<void>(resolve => setTimeout(resolve, 800));
   }
@@ -61,6 +60,31 @@ export class HermesSession {
     }
 
     return result.result.value as T;
+  }
+
+  // Returns all available CDP targets. Polls until at least one appears.
+  async waitForMetroTargets(timeoutMs = 60_000): Promise<PageDescriptor[]> {
+    const url = `http://localhost:${this.config.metroPort}/json`;
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+      try {
+        const res = await fetch(url);
+        if (res.ok) {
+          const pages = (await res.json()) as PageDescriptor[];
+          const targets = pages.filter(p => p.webSocketDebuggerUrl);
+          if (targets.length > 0) return targets;
+        }
+      } catch {
+        // Metro not up yet
+      }
+      await sleep(500);
+    }
+
+    throw new Error(
+      `Timed out waiting for Metro CDP targets at ${url}. ` +
+        'Ensure `expo run:ios` (or :android) is running.',
+    );
   }
 
   private openSocket(url: string): Promise<void> {
@@ -114,30 +138,6 @@ export class HermesSession {
       this.pendingCalls.set(id, { resolve, reject });
       this.ws!.send(JSON.stringify({ id, method, params }));
     });
-  }
-
-  async waitForMetroTarget(timeoutMs = 60_000): Promise<PageDescriptor> {
-    const url = `http://localhost:${this.config.metroPort}/json`;
-    const deadline = Date.now() + timeoutMs;
-
-    while (Date.now() < deadline) {
-      try {
-        const res = await fetch(url);
-        if (res.ok) {
-          const pages = (await res.json()) as PageDescriptor[];
-          const target = pages.find(p => p.webSocketDebuggerUrl);
-          if (target) return target;
-        }
-      } catch {
-        // Metro not up yet
-      }
-      await sleep(500);
-    }
-
-    throw new Error(
-      `Timed out waiting for Metro CDP target at ${url}. ` +
-        'Ensure `expo run:ios` (or :android) is running.',
-    );
   }
 }
 

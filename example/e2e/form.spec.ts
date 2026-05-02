@@ -150,4 +150,25 @@ describe('Form — new APIs', () => {
     const summary = await app.find({ testID: 'summary-plan' });
     await expect(summary).not.toHaveText('Plan: pro');
   });
+
+  it('toBeChecked passes after check()', async (app: AppSession) => {
+    await goToForm(app);
+    const sw = await app.find({ testID: 'toggle-notifications' });
+    await sw.check();
+    await expect(sw).toBeChecked();
+  });
+
+  it('not.toBeChecked passes when unchecked', async (app: AppSession) => {
+    await goToForm(app);
+    const sw = await app.find({ testID: 'toggle-notifications' });
+    await sw.uncheck();
+    await expect(sw).not.toBeChecked();
+  });
+
+  it('toHaveFocus passes after focus()', async (app: AppSession) => {
+    await goToForm(app);
+    const input = await app.find({ testID: 'input-name' });
+    await input.focus();
+    await expect(input).toHaveFocus();
+  });
 });

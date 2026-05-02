@@ -3,6 +3,7 @@ import { HermesSession } from './HermesSession';
 import { Element, type NodeDescriptor } from './Element';
 import { BRIDGE_INJECTOR_SCRIPT } from '../bridge/injector';
 import { NETWORK_MOCK_SCRIPT } from '../bridge/network-mock';
+import { CLOCK_SCRIPT } from '../bridge/clock';
 import { STORAGE_BRIDGE_SCRIPT } from '../bridge/storage';
 import type { E2EConfig } from '../config';
 import {
@@ -39,6 +40,9 @@ export type NetworkRequest = {
   url: string;
   method: string;
   body: unknown;
+  status: number | null;
+  responseBody: unknown;
+  settled: boolean;
 };
 
 type SerializedMatcher = {
@@ -74,7 +78,6 @@ export class AppSession {
   async start(): Promise<void> {
     await this.device.init();
     await this.device.launch();
-    await this.hermes.connect();
     await this.injectBridge();
   }
 
@@ -82,7 +85,6 @@ export class AppSession {
     await this.hermes.disconnect();
     await this.device.terminate();
     await this.device.launch();
-    await this.hermes.connect();
     await this.injectBridge();
   }
 
@@ -92,15 +94,73 @@ export class AppSession {
   }
 
   private async injectBridge(): Promise<void> {
-    const ok = await this.hermes.evaluate<boolean>(BRIDGE_INJECTOR_SCRIPT);
-    if (!ok) {
-      throw new Error(
-        'Bridge injection returned false — __REACT_DEVTOOLS_GLOBAL_HOOK__ not found. ' +
-          'Ensure the app is running with Hermes and the bundle is loaded.',
-      );
+    // In Expo dev client / New Architecture, Metro exposes multiple CDP targets.
+    // Strategy:
+    //   1. Sort targets: bundleId match first, known Expo shell IDs last.
+    //   2. For each target, stay connected and retry injection up to 5 s (same pattern as
+    //      old code — rapid disconnect/reconnect causes issues on Android's Metro proxy).
+    //   3. If no target succeeds, wait 500 ms and re-fetch — handles the case where the
+    //      app target appears after the shell target.
+    const EXPO_SHELL_IDS = ['host.exp.exponent', 'io.expo.devclient'];
+    const deadline = Date.now() + 60_000;
+
+    while (Date.now() < deadline) {
+      let targets: Array<{ title?: string; webSocketDebuggerUrl: string }> = [];
+      try {
+        const res = await fetch(`http://localhost:${this.config.metroPort}/json`);
+        if (res.ok) {
+          const pages = (await res.json()) as Array<{ title?: string; webSocketDebuggerUrl?: string }>;
+          const all = pages.filter(
+            (p): p is { title?: string; webSocketDebuggerUrl: string } => Boolean(p.webSocketDebuggerUrl),
+          );
+          const bundleId = this.config.bundleId.toLowerCase();
+          const isShell = (t: { title?: string }) =>
+            EXPO_SHELL_IDS.some(id => t.title?.toLowerCase().includes(id));
+          targets = [
+            ...all.filter(t => t.title?.toLowerCase().includes(bundleId)),
+            ...all.filter(t => !t.title?.toLowerCase().includes(bundleId) && !isShell(t)),
+            ...all.filter(isShell),
+          ];
+        }
+      } catch {
+        // Metro not up yet
+      }
+
+      for (const target of targets) {
+        try {
+          await this.hermes.disconnect();
+          await this.hermes.connect(target.webSocketDebuggerUrl);
+
+          // Stay connected while retrying — mirroring the old behaviour so Android's
+          // Metro proxy isn't hit with rapid reconnects while the JS bundle loads.
+          const perTargetDeadline = Date.now() + 5_000;
+          let ok = false;
+          while (Date.now() < perTargetDeadline) {
+            ok = await this.hermes.evaluate<boolean>(BRIDGE_INJECTOR_SCRIPT);
+            if (ok) break;
+            await sleep(250);
+          }
+
+          if (ok) {
+            await this.hermes.evaluate(NETWORK_MOCK_SCRIPT);
+            await this.hermes.evaluate(STORAGE_BRIDGE_SCRIPT);
+            await this.hermes.evaluate(CLOCK_SCRIPT);
+            return;
+          }
+
+          await this.hermes.disconnect();
+        } catch {
+          try { await this.hermes.disconnect(); } catch {}
+        }
+      }
+
+      await sleep(500);
     }
-    await this.hermes.evaluate(NETWORK_MOCK_SCRIPT);
-    await this.hermes.evaluate(STORAGE_BRIDGE_SCRIPT);
+
+    throw new Error(
+      `Bridge injection failed — no CDP target at http://localhost:${this.config.metroPort}/json ` +
+        'had __REACT_DEVTOOLS_GLOBAL_HOOK__. Ensure the app is running with Hermes.',
+    );
   }
 
   // ── Network mocking ──────────────────────────────────────────────────────────
@@ -136,6 +196,50 @@ export class AppSession {
     await this.hermes.evaluate(`globalThis.__testNetworkOffline__ = ${offline}`);
   }
 
+  private matchesNetworkMatcher(
+    req: NetworkRequest,
+    matcher: string | RegExp | NetworkMatcher,
+  ): boolean {
+    const url = typeof matcher === 'string' || matcher instanceof RegExp ? matcher : matcher.url;
+    const method =
+      typeof matcher === 'object' && !(matcher instanceof RegExp)
+        ? matcher.method?.toUpperCase()
+        : undefined;
+    const urlMatch = url instanceof RegExp ? url.test(req.url) : req.url === url;
+    const methodMatch = !method || req.method === method;
+    return urlMatch && methodMatch;
+  }
+
+  async waitForRequest(
+    matcher: string | RegExp | NetworkMatcher,
+    opts?: { timeout?: number },
+  ): Promise<NetworkRequest> {
+    const timeout = opts?.timeout ?? this.config.defaultTimeout;
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      const reqs = await this.networkRequests();
+      const match = reqs.find(r => this.matchesNetworkMatcher(r, matcher));
+      if (match) return match;
+      await new Promise(r => setTimeout(r, 250));
+    }
+    throw new Error(`waitForRequest: no matching request within ${timeout}ms`);
+  }
+
+  async waitForResponse(
+    matcher: string | RegExp | NetworkMatcher,
+    opts?: { timeout?: number },
+  ): Promise<NetworkRequest> {
+    const timeout = opts?.timeout ?? this.config.defaultTimeout;
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      const reqs = await this.networkRequests();
+      const match = reqs.find(r => this.matchesNetworkMatcher(r, matcher) && r.settled);
+      if (match) return match;
+      await new Promise(r => setTimeout(r, 250));
+    }
+    throw new Error(`waitForResponse: no matching response within ${timeout}ms`);
+  }
+
   // Called by TestRunner around beforeAll hooks
   enterSuiteScope(): void { this.inSuiteScope = true; }
   exitSuiteScope(): void  { this.inSuiteScope = false; }
@@ -152,7 +256,7 @@ export class AppSession {
   // Called by TestRunner after afterAll hooks
   clearSuiteMocks(): void { this.suiteMocks = []; }
 
-  private step(msg: string): void {
+  private log(msg: string): void {
     if (this.config.verbose) console.log(`        ${msg}`);
   }
 
@@ -164,14 +268,14 @@ export class AppSession {
     if (!descriptor) {
       throw new Error(`find() — element not found: ${JSON.stringify(selector)}`);
     }
-    this.step(`find: ${selectorStep(selector)}`);
+    this.log(`find: ${selectorStep(selector)}`);
     return new Element(descriptor, this.hermes, this.config.verbose);
   }
 
   async findAll(selector: Selector): Promise<Element[]> {
     const expr = selectorToAllExpression(selector);
     const descriptors = await this.hermes.evaluate<NodeDescriptor[]>(expr);
-    this.step(`findAll: ${selectorStep(selector)} (${descriptors.length} found)`);
+    this.log(`findAll: ${selectorStep(selector)} (${descriptors.length} found)`);
     return descriptors.map(d => new Element(d, this.hermes, this.config.verbose));
   }
 
@@ -191,7 +295,7 @@ export class AppSession {
     while (Date.now() < deadline) {
       const descriptor = await this.hermes.evaluate<NodeDescriptor | null>(expr);
       if (descriptor) {
-        this.step(`waitFor: ${selectorStep(selector)}`);
+        this.log(`waitFor: ${selectorStep(selector)}`);
         return new Element(descriptor, this.hermes, this.config.verbose);
       }
       await sleep(interval);
@@ -226,6 +330,29 @@ export class AppSession {
     print(roots, 0);
   }
 
+  async step(name: string, fn: () => Promise<void>): Promise<void> {
+    if (this.config.verbose) console.log(`      ⋯ ${name}`);
+    try {
+      await fn();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`[${name}] ${msg}`);
+    }
+  }
+
+  get clock() {
+    return {
+      install: (baseTime?: number): Promise<void> =>
+        this.hermes.evaluate(`__testClock__.install(${baseTime ?? 'undefined'})`).then(() => {}),
+      tick: (ms: number): Promise<void> =>
+        this.hermes.evaluate(`__testClock__.tick(${ms})`).then(() => {}),
+      restore: (): Promise<void> =>
+        this.hermes.evaluate('__testClock__.restore()').then(() => {}),
+      now: (): Promise<number> =>
+        this.hermes.evaluate<number>('__testClock__.now()'),
+    };
+  }
+
   async waitFor(
     fn: () => Promise<boolean>,
     opts?: { timeout?: number; interval?: number },
@@ -255,7 +382,7 @@ export class AppSession {
 
     const initial = await tryFind();
     if (initial) {
-      this.step(`scrollAndFind: ${testID}`);
+      this.log(`scrollAndFind: ${testID}`);
       return initial;
     }
 
@@ -269,7 +396,7 @@ export class AppSession {
       while (Date.now() < pollDeadline) {
         const el = await tryFind();
         if (el) {
-          this.step(`scrollAndFind: ${testID}`);
+          this.log(`scrollAndFind: ${testID}`);
           return el;
         }
         await sleep(this.config.pollInterval);
@@ -301,13 +428,13 @@ export class AppSession {
           `!__testBridge__.exists(${JSON.stringify(selector.testID)})`,
         );
         if (gone) {
-          this.step(`waitForGone: ${selectorStep(selector)}`);
+          this.log(`waitForGone: ${selectorStep(selector)}`);
           return;
         }
       } else {
         const descriptor = await this.hermes.evaluate<NodeDescriptor | null>(expr!);
         if (!descriptor) {
-          this.step(`waitForGone: ${selectorStep(selector)}`);
+          this.log(`waitForGone: ${selectorStep(selector)}`);
           return;
         }
       }

@@ -241,6 +241,71 @@ Re-apply after each `reset()` if needed, since the patch is scoped to a single a
 
 ---
 
+## Timer control
+
+`app.clock` gives you a fake timer implementation that runs inside the Hermes engine. Install it to freeze real time, advance it by an explicit amount, and run all scheduled callbacks without waiting for real milliseconds to pass.
+
+### `app.clock.install(baseTime?)`
+
+Patches `globalThis.setTimeout`, `clearTimeout`, `setInterval`, `clearInterval`, and `Date.now` in the app's JS runtime. Time stops advancing until you call `tick()`. If `baseTime` is omitted, the clock starts at the current real timestamp.
+
+```ts
+beforeAll(async (app) => {
+  await app.clock.install();
+});
+```
+
+### `app.clock.tick(ms)`
+
+Advances fake time by `ms` milliseconds, firing every queued callback that falls within that window in chronological order. Callbacks are invoked synchronously inside the `evaluate` call, so React state updates triggered by them are committed before `tick()` returns.
+
+```ts
+it('shows the result without a real 2 s wait', async (app) => {
+  await app.clock.install();
+  await (await app.find({ testID: 'btn-async' })).tap();
+  await app.clock.tick(2000);
+  const result = await app.waitForElement('async-result', { timeout: 1_000 });
+  expect(await result.text()).toBe('Done!');
+});
+```
+
+`waitForElement` still uses real Node.js polling (host-side), so it is unaffected by the fake clock patch.
+
+### `app.clock.restore()`
+
+Restores the original timer functions and clears the queue. Called automatically after each `reset()` (the app restart gives a fresh Hermes context, so the patch is gone regardless).
+
+### `app.clock.now()`
+
+Returns the current fake timestamp as a number. Useful for assertions that involve `Date.now()`.
+
+---
+
+## Named steps
+
+### `app.step(name, fn)`
+
+Wraps an async function as a named step. On failure, the step name is prepended to the error message, making it immediately clear which phase of a long test failed. In `--verbose` mode, the step name is also printed as execution enters it.
+
+```ts
+it('completes the checkout flow', async (app) => {
+  await app.step('add item to cart', async () => {
+    await (await app.find({ testID: 'btn-add-to-cart' })).tap();
+    await app.waitForElement('cart-badge');
+  });
+
+  await app.step('submit order', async () => {
+    await (await app.find({ testID: 'btn-checkout' })).tap();
+    await app.waitForElement('order-confirmation');
+  });
+});
+// failure example: "[submit order] Expected: element with testID 'order-confirmation'"
+```
+
+`app.step` is most useful for integration tests that span multiple screens. For short tests (3–5 actions), the normal error message and screenshot are usually enough context.
+
+---
+
 ## Storage
 
 These methods read and write `AsyncStorage`. They require `@react-native-async-storage/async-storage` to be bundled in the app.

@@ -5,6 +5,10 @@
   // Registry maps integer nodeId -> fiber reference
   var registry = [];
 
+  // Track which nodeId was most recently focused via focus(). Cleared on blur().
+  // ReactNativeFiberHostComponent does not expose isFocused(), so we track it here.
+  var _focusedNodeId = null;
+
   function register(fiber) {
     registry.push(fiber);
     return registry.length - 1;
@@ -151,21 +155,36 @@
     return false;
   }
 
+  function findHostFiberDown(fiber) {
+    if (fiber.tag === 5 && fiber.stateNode) return fiber;
+    var result = null;
+    walk(fiber.child, function (f) {
+      if (result) return;
+      if (f.tag === 5 && f.stateNode) result = f;
+    });
+    return result;
+  }
+
   function focus(nodeId) {
     var fiber = getCurrentFiber(nodeId);
     if (!fiber) return false;
+    // Fire the onFocus event handler so React state updates (e.g. focus indicators) work.
     var current = fiber;
     while (current) {
       if (current.memoizedProps && typeof current.memoizedProps.onFocus === 'function') {
-        try { current.memoizedProps.onFocus({ nativeEvent: {} }); return true; } catch (e) { return false; }
+        try { current.memoizedProps.onFocus({ nativeEvent: {} }); } catch (e) {}
+        break;
       }
       current = current.return;
     }
-    // Fallback: try stateNode.focus() on HostComponent
-    if (fiber.stateNode && typeof fiber.stateNode.focus === 'function') {
-      try { fiber.stateNode.focus(); return true; } catch (e) {}
+    // Natively focus the HostComponent (sends UIManager focus command to native).
+    var host = findHostFiberDown(fiber);
+    if (host && typeof host.stateNode.focus === 'function') {
+      try { host.stateNode.focus(); } catch (e) {}
     }
-    return false;
+    // Track focused node in bridge — ReactNativeFiberHostComponent has no isFocused().
+    _focusedNodeId = nodeId;
+    return true;
   }
 
   function blur(nodeId) {
@@ -174,14 +193,17 @@
     var current = fiber;
     while (current) {
       if (current.memoizedProps && typeof current.memoizedProps.onBlur === 'function') {
-        try { current.memoizedProps.onBlur({ nativeEvent: {} }); return true; } catch (e) { return false; }
+        try { current.memoizedProps.onBlur({ nativeEvent: {} }); } catch (e) {}
+        break;
       }
       current = current.return;
     }
-    if (fiber.stateNode && typeof fiber.stateNode.blur === 'function') {
-      try { fiber.stateNode.blur(); return true; } catch (e) {}
+    var host = findHostFiberDown(fiber);
+    if (host && typeof host.stateNode.blur === 'function') {
+      try { host.stateNode.blur(); } catch (e) {}
     }
-    return false;
+    if (_focusedNodeId === nodeId) _focusedNodeId = null;
+    return true;
   }
 
   function submitEditing(nodeId) {
@@ -308,6 +330,9 @@
   }
 
   function isFocused(nodeId) {
+    // Check bridge-tracked focus first (set by our focus() / cleared by blur()).
+    if (_focusedNodeId === nodeId) return true;
+    // Fallback: consumer component set accessibilityState.focused on the fiber.
     var fiber = getCurrentFiber(nodeId);
     if (!fiber) return false;
     var p = fiber.memoizedProps || {};

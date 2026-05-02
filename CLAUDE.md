@@ -97,6 +97,13 @@ Key methods on `AppSession`:
 | `removeStorage(key)` | Deletes a key from AsyncStorage. |
 | `clearStorage()` | Clears all AsyncStorage keys. |
 | `setNetworkOffline(offline)` | When `true`, all `fetch` calls reject with a network error (requests are still logged). Automatically reset to `false` after each `reset()`. |
+| `waitForRequest(matcher, opts?)` | Polls until a request matching `matcher` (string, RegExp, or `NetworkMatcher`) appears in the log; returns the entry |
+| `waitForResponse(matcher, opts?)` | Same but waits until the response has settled; returned entry includes `status` and `responseBody` |
+| `step(name, fn)` | Runs `fn` as a named step; prefixes the error message with `[name]` on failure; prints the name in verbose mode |
+| `clock.install(baseTime?)` | Patches `setTimeout`/`setInterval`/`Date.now` in Hermes to use fake time |
+| `clock.tick(ms)` | Advances fake time by `ms`, firing all queued callbacks in chronological order |
+| `clock.restore()` | Restores real timers; called automatically on `reset()` (new Hermes context) |
+| `clock.now()` | Returns current fake timestamp |
 
 ### Element API
 
@@ -162,13 +169,24 @@ When passed an `Element`, `expect()` returns an **async auto-waiting** `AsyncEle
 await expect(element).toHaveText(expected)         // string or RegExp; polls until text matches
 await expect(element).toHaveValue(expected)        // polls until inputValue() matches
 await expect(element).toBeVisible()                // polls until isVisible() is true
-await expect(element).toBeEnabled()               // polls until isEnabled() is true
+await expect(element).toBeEnabled()                // polls until isEnabled() is true
+await expect(element).toBeDisabled()               // polls until isEnabled() is false
+await expect(element).toBeHidden()                 // polls until isVisible() is false
+await expect(element).toBeChecked()                // polls until isChecked() is true
+await expect(element).toHaveFocus()                // polls until isFocused() is true
 await expect(element).not.toHaveText('wrong')      // negation; passes as soon as condition is false
 // All async matchers accept an optional opts: { timeout?: number }
 await expect(element).toHaveText('Done', { timeout: 8_000 })
 ```
 
 Failures throw `AssertionError`, which the runner catches and marks as a test failure.
+
+`expect.soft(value)` works like `expect(value)` but queues failures instead of throwing. All queued failures are reported together at the end of the test. Hard failures (throws) win over soft failures. Supports the full sync and async matcher API including `.not`.
+
+```ts
+expect.soft(await label.text()).toBe('Done');   // queued on failure, test continues
+await expect.soft(element).toBeVisible();        // async soft assertion
+```
 
 ### `__testBridge__` bridge surface
 

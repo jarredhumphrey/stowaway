@@ -175,6 +175,44 @@ const submitBtn = await app.find({ testID: 'btn-submit' });
 await expect(submitBtn).toBeEnabled();
 ```
 
+### `toBeDisabled()`
+
+Polls until `element.isEnabled()` returns `false`. Inverse of `toBeEnabled()`.
+
+```ts
+const btn = await app.find({ testID: 'btn-disabled' });
+await expect(btn).toBeDisabled();
+```
+
+### `toBeHidden()`
+
+Polls until `element.isVisible()` returns `false` — i.e. the element is no longer in the committed fiber tree. Convenient alternative to `waitForElementToDisappear` when you already have an `Element` reference.
+
+```ts
+const spinner = await app.find({ testID: 'loading-spinner' });
+await expect(spinner).toBeHidden({ timeout: 5_000 });
+```
+
+### `toBeChecked()`
+
+Polls until `element.isChecked()` returns `true`. Use for `Switch` and other boolean toggles.
+
+```ts
+const sw = await app.find({ testID: 'toggle-notifications' });
+await sw.check();
+await expect(sw).toBeChecked();
+```
+
+### `toHaveFocus()`
+
+Polls until `element.isFocused()` returns `true` — i.e. `accessibilityState.focused` is set.
+
+```ts
+const input = await app.find({ testID: 'input-name' });
+await input.focus();
+await expect(input).toHaveFocus();
+```
+
 ### Negation with `.not`
 
 All async matchers support `.not`:
@@ -199,6 +237,28 @@ expect(props).not.toHaveAccessibilityRole('none');
 ```
 
 `.not` chains: `expect(value).not.toBeTruthy()` is the same as `expect(value).toBeFalsy()`, but the error message is more descriptive in the `.not` form when you want to express the intent clearly.
+
+---
+
+## Soft assertions
+
+`expect.soft(value)` works exactly like `expect(value)` — it supports the full sync and async matcher API including `.not` — but **does not stop the test on failure**. Failures are queued and reported together as a single combined error at the end of the test.
+
+```ts
+const value = await app.find({ testID: 'counter-value' });
+expect.soft(await value.text()).toBe('0');       // queued on failure, test continues
+expect.soft(await value.text()).toContain('0');  // queued on failure, test continues
+// end of test: "2 soft assertion(s) failed:\n  • Expected: ..."
+```
+
+Async matchers also work:
+
+```ts
+await expect.soft(element).toHaveText('Done');
+await expect.soft(element).not.toBeVisible();
+```
+
+If the test function throws a hard failure before the flush, the hard error wins and any queued soft failures are discarded. Soft assertions are cleared automatically before each test and flushed automatically after the test function resolves.
 
 ---
 

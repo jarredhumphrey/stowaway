@@ -38,18 +38,30 @@ export const NETWORK_MOCK_SCRIPT = `
       var method = (init && init.method) || (input && input.method) || 'GET';
       var body = init && init.body;
 
-      globalThis.__testNetworkMocks__.requests.push({
+      var entry = {
         url: url,
         method: method.toUpperCase(),
         body: body ? tryParseJson(body) : null,
-      });
+        status: null,
+        responseBody: null,
+        settled: false,
+      };
+      globalThis.__testNetworkMocks__.requests.push(entry);
 
       if (globalThis.__testNetworkOffline__) {
+        entry.settled = true;
         return Promise.reject(new TypeError('Network request failed'));
       }
 
       var mock = findMock(url, method);
-      if (!mock) return originalFetch.apply(this, arguments);
+      if (!mock) {
+        var realPromise = originalFetch.apply(this, arguments);
+        realPromise.then(
+          function (res) { entry.status = res.status; entry.settled = true; },
+          function ()    { entry.settled = true; }
+        );
+        return realPromise;
+      }
 
       var response = mock.response;
       var status = response.status !== undefined ? response.status : 200;
@@ -60,6 +72,9 @@ export const NETWORK_MOCK_SCRIPT = `
 
       return new Promise(function (resolve) {
         setTimeout(function () {
+          entry.status = status;
+          entry.responseBody = resolvedBody;
+          entry.settled = true;
           resolve({
             status: status,
             ok: status >= 200 && status < 300,

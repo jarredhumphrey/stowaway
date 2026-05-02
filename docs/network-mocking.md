@@ -209,12 +209,90 @@ it('sends the correct payload on sign-in', async (app) => {
 ```ts
 type NetworkRequest = {
   url: string;
-  method: string;   // uppercase: 'GET', 'POST', etc.
-  body: unknown;    // parsed JSON if the body was a JSON string, otherwise raw
+  method: string;        // uppercase: 'GET', 'POST', etc.
+  body: unknown;         // parsed JSON if the body was a JSON string, otherwise raw
+  status: number | null; // null until the response settles
+  responseBody: unknown; // null until the response settles
+  settled: boolean;      // true once the response has been received
 };
 ```
 
 The request log is cleared on each app relaunch (between tests). Within a single test you can call `networkRequests()` multiple times to see all requests accumulated since the test started.
+
+---
+
+## Waiting for a specific request
+
+`waitForRequest(matcher, opts?)` polls the request log until an entry matching `matcher` appears, then returns it. The matcher accepts the same forms as `mockNetwork`:
+
+```ts
+// string — exact URL
+const req = await app.waitForRequest('https://api.example.com/users/1');
+
+// RegExp — URL pattern
+const req = await app.waitForRequest(/\/users\/\d+/);
+
+// NetworkMatcher object — URL + optional method filter
+const req = await app.waitForRequest({ url: /\/users\/\d+/, method: 'POST' });
+```
+
+`waitForRequest` resolves as soon as the request is logged, even before the response arrives. Use it to assert on the request payload or to verify that a call was made at all.
+
+```ts
+it('sends the correct payload', async (app) => {
+  await app.mockNetwork({ url: /\/api\/login/ }, { status: 200, body: { token: 'tok' } });
+  await (await app.find({ testID: 'btn-sign-in' })).tap();
+  const req = await app.waitForRequest({ url: /\/api\/login/, method: 'POST' });
+  expect(req.method).toBe('POST');
+  expect((req.body as Record<string, unknown>).email).toBe('user@example.com');
+});
+```
+
+---
+
+## Waiting for a response
+
+`waitForResponse(matcher, opts?)` works like `waitForRequest` but waits until the response has also settled (`settled: true`). The returned entry includes `status` and `responseBody`.
+
+```ts
+it('returns the correct status and body', async (app) => {
+  await app.mockNetwork(
+    { url: /\/api\/users\/1/ },
+    { status: 200, body: { name: 'Jane' } },
+  );
+  await (await app.find({ testID: 'btn-fetch-user' })).tap();
+  const res = await app.waitForResponse(/\/api\/users\/1/);
+  expect(res.status).toBe(200);
+  expect(res.responseBody).toMatchObject({ name: 'Jane' });
+});
+```
+
+For mocked responses this resolves instantly (after any configured `delay`). For passthrough requests it resolves once the real response is received. Both `waitForRequest` and `waitForResponse` accept an optional `{ timeout }` override (default: `DEFAULT_TIMEOUT`).
+
+---
+
+## Combining inspection and mocking
+
+```ts
+it('full request/response cycle', async (app) => {
+  await app.mockNetwork(
+    { method: 'POST', url: /\/api\/login/ },
+    { status: 200, body: { token: 'tok123' } },
+  );
+
+  const input = await app.find({ testID: 'input-email' });
+  await input.typeText('user@example.com');
+  await (await app.find({ testID: 'btn-sign-in' })).tap();
+
+  // Assert on what was sent
+  const req = await app.waitForRequest({ url: /\/api\/login/, method: 'POST' });
+  expect((req.body as Record<string, unknown>).email).toBe('user@example.com');
+
+  // Assert on what came back
+  const res = await app.waitForResponse(/\/api\/login/);
+  expect(res.status).toBe(200);
+});
+```
 
 ---
 

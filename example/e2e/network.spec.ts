@@ -124,3 +124,53 @@ describe('Network — offline simulation', () => {
     expect(await name.text()).toBe('Back Online');
   });
 });
+
+describe('Network — waitForRequest', () => {
+  it('resolves as soon as the request is made', async (app: AppSession) => {
+    await goToNetwork(app);
+    await app.mockNetwork(
+      { url: /jsonplaceholder.*\/users\/1/ },
+      { status: 200, body: { name: 'Jane', email: 'jane@example.com' } },
+    );
+    await (await app.find({ testID: 'btn-fetch-user' })).tap();
+    const req = await app.waitForRequest(/jsonplaceholder.*\/users\/1/);
+    expect(req.method).toBe('GET');
+    expect(req.url).toContain('/users/1');
+  });
+
+  it('supports exact string matcher', async (app: AppSession) => {
+    await goToNetwork(app);
+    await app.mockNetwork(
+      { url: /jsonplaceholder.*\/users\/1/ },
+      { status: 200, body: { name: 'Jane', email: 'jane@example.com' } },
+    );
+    await (await app.find({ testID: 'btn-fetch-user' })).tap();
+    const req = await app.waitForRequest({ url: /jsonplaceholder.*\/users\/1/, method: 'GET' });
+    expect(req.method).toBe('GET');
+  });
+});
+
+describe('Network — waitForResponse', () => {
+  it('resolves once the mocked response settles with correct body', async (app: AppSession) => {
+    await goToNetwork(app);
+    await app.mockNetwork(
+      { url: /jsonplaceholder.*\/users\/1/ },
+      { status: 200, body: { name: 'Jane', email: 'jane@example.com' } },
+    );
+    await (await app.find({ testID: 'btn-fetch-user' })).tap();
+    const res = await app.waitForResponse(/jsonplaceholder.*\/users\/1/);
+    expect(res.status).toBe(200);
+    expect(res.responseBody).toMatchObject({ name: 'Jane' });
+  });
+
+  it('captures a 500 error response', async (app: AppSession) => {
+    await goToNetwork(app);
+    await app.mockNetwork(
+      { url: /jsonplaceholder.*\/users\/1/ },
+      { status: 500, body: { error: 'server error' } },
+    );
+    await (await app.find({ testID: 'btn-fetch-user' })).tap();
+    const res = await app.waitForResponse(/jsonplaceholder.*\/users\/1/);
+    expect(res.status).toBe(500);
+  });
+});

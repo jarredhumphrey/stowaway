@@ -1,13 +1,34 @@
 import { Element } from './Element';
 
+// --- Soft assertion collector ---
+
+let _softFailures: string[] = [];
+
+export function clearSoftFailures(): void {
+  _softFailures = [];
+}
+
+export function flushSoftFailures(): void {
+  const failures = _softFailures.slice();
+  _softFailures = [];
+  if (failures.length > 0) {
+    throw new AssertionError(
+      `${failures.length} soft assertion(s) failed:\n${failures.map(f => `  • ${f}`).join('\n')}`,
+    );
+  }
+}
+
+// --- Async element matchers ---
+
 class AsyncElementExpect {
   constructor(
     private element: Element,
     private negated = false,
+    private onFail: (msg: string) => void = (msg) => { throw new AssertionError(msg); },
   ) {}
 
   get not(): AsyncElementExpect {
-    return new AsyncElementExpect(this.element, !this.negated);
+    return new AsyncElementExpect(this.element, !this.negated, this.onFail);
   }
 
   private async poll(
@@ -23,7 +44,7 @@ class AsyncElementExpect {
       await new Promise(r => setTimeout(r, 250));
     }
     const prefix = this.negated ? 'Expected NOT: ' : 'Expected: ';
-    throw new AssertionError(prefix + message);
+    this.onFail(prefix + message);
   }
 
   async toHaveText(expected: string | RegExp, opts?: { timeout?: number }): Promise<void> {
@@ -48,23 +69,42 @@ class AsyncElementExpect {
       opts,
     );
   }
+
+  async toBeChecked(opts?: { timeout?: number }): Promise<void> {
+    await this.poll(() => this.element.isChecked(), 'element to be checked', opts);
+  }
+
+  async toBeDisabled(opts?: { timeout?: number }): Promise<void> {
+    await this.poll(async () => !(await this.element.isEnabled()), 'element to be disabled', opts);
+  }
+
+  async toBeHidden(opts?: { timeout?: number }): Promise<void> {
+    await this.poll(async () => !(await this.element.isVisible()), 'element to be hidden', opts);
+  }
+
+  async toHaveFocus(opts?: { timeout?: number }): Promise<void> {
+    await this.poll(() => this.element.isFocused(), 'element to have focus', opts);
+  }
 }
+
+// --- Sync matchers ---
 
 class Assertion {
   constructor(
     private value: unknown,
     private negated = false,
+    private onFail: (msg: string) => void = (msg) => { throw new AssertionError(msg); },
   ) {}
 
   get not(): Assertion {
-    return new Assertion(this.value, !this.negated);
+    return new Assertion(this.value, !this.negated, this.onFail);
   }
 
   private pass(result: boolean, message: string): void {
     const success = this.negated ? !result : result;
     if (!success) {
       const prefix = this.negated ? 'Expected NOT: ' : 'Expected: ';
-      throw new AssertionError(prefix + message + ` (received: ${format(this.value)})`);
+      this.onFail(prefix + message + ` (received: ${format(this.value)})`);
     }
   }
 
@@ -168,9 +208,20 @@ function format(v: unknown): string {
   return JSON.stringify(v);
 }
 
+const softOnFail = (msg: string): void => { _softFailures.push(msg); };
+
+function softExpect(value: Element): AsyncElementExpect;
+function softExpect(value: unknown): Assertion;
+function softExpect(value: unknown): AsyncElementExpect | Assertion {
+  if (value instanceof Element) return new AsyncElementExpect(value, false, softOnFail);
+  return new Assertion(value, false, softOnFail);
+}
+
 export function expect(value: Element): AsyncElementExpect;
 export function expect(value: unknown): Assertion;
 export function expect(value: unknown): AsyncElementExpect | Assertion {
   if (value instanceof Element) return new AsyncElementExpect(value);
   return new Assertion(value);
 }
+
+expect.soft = softExpect;

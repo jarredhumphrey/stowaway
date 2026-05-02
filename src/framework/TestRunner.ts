@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { AppSession } from './AppSession';
-import { AssertionError } from './expect';
+import { AssertionError, clearSoftFailures, flushSoftFailures } from './expect';
 import type { E2EConfig } from '../config';
 
 type Hook = (app: AppSession) => Promise<void>;
@@ -153,9 +153,9 @@ export class TestRunner {
     console.log(`\n🧪  ${label}\n`);
 
     const runStart = Date.now();
-    await session.start();
 
     try {
+      await session.start();
       // Respect describe.only — if any suite is marked only, run only those
       const suitesToRun = rootSuites.some(s => s.only)
         ? rootSuites.filter(s => s.only)
@@ -212,8 +212,10 @@ export class TestRunner {
           const timeoutMs = test.timeout ?? this.config.defaultTimeout;
           const retries = test.retries ?? 0;
 
+          clearSoftFailures();
           try {
             await runWithRetry(test.fn, session, timeoutMs, retries);
+            flushSoftFailures();
           } catch (err) {
             status = 'fail';
             errorMsg =

@@ -48,6 +48,19 @@ describe('Buttons', () => {
     expect((props.accessibilityState as Record<string, unknown>)?.disabled).toBe(true);
   });
 
+  it('toBeDisabled passes on a disabled element', async (app: AppSession) => {
+    const btn = await app.find({ testID: 'btn-disabled' });
+    await expect(btn).toBeDisabled();
+  });
+
+  it('toBeHidden passes after element disappears', async (app: AppSession) => {
+    const btn = await app.find({ testID: 'btn-show-hide' });
+    await btn.tap();
+    await app.waitForElement('timed-element', { timeout: 3_000 });
+    const el = await app.find({ testID: 'timed-element' });
+    await expect(el).toBeHidden({ timeout: 5_000 });
+  });
+
   it('finds all action buttons', async (app: AppSession) => {
     const buttons = await app.findAll({ component: 'TouchableOpacity' });
     // At least the 5 action buttons + counter buttons should be present
@@ -99,6 +112,15 @@ describe('Buttons', () => {
     const btn = await app.find({ testID: 'btn-async' });
     await btn.tap();
     const result = await app.waitForElement({ text: 'Done!' }, { timeout: 5_000 });
+    expect(await result.text()).toBe('Done!');
+  });
+
+  it('clock.tick advances setTimeout without real waiting', async (app: AppSession) => {
+    await app.clock.install();
+    const btn = await app.find({ testID: 'btn-async' });
+    await btn.tap();
+    await app.clock.tick(2000);
+    const result = await app.waitForElement('async-result', { timeout: 2_000 });
     expect(await result.text()).toBe('Done!');
   });
 });
