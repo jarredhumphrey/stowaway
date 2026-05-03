@@ -1,7 +1,7 @@
 export { describe, it, beforeAll, beforeEach, afterEach, afterAll, TestRunner } from './framework/TestRunner';
 export { expect, AssertionError } from './framework/expect';
 export { AppSession } from './framework/AppSession';
-export type { Selector, NetworkMatcher, NetworkResponse, NetworkRequest, StatusBarOptions } from './framework/AppSession';
+export type { Selector, NetworkMatcher, NetworkResponse, NetworkRequest, StatusBarOptions, TraceStep } from './framework/AppSession';
 export { loadConfig } from './config';
 export type { E2EConfig } from './config';
 export { Device } from './framework/Device';

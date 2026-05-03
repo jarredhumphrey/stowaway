@@ -1,7 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { AppSession } from './AppSession';
+import type { TraceStep } from './TraceCollector';
 import { AssertionError, clearSoftFailures, flushSoftFailures } from './expect';
+import { generateHtmlReport } from './htmlReport';
 import type { E2EConfig } from '../config';
 
 type Hook = (app: AppSession) => Promise<void>;
@@ -40,6 +42,7 @@ interface TestResult {
   error?: string;
   screenshotPath?: string;
   replayVideoPath?: string;
+  traceSteps?: TraceStep[];
 }
 
 // ── Registration API ─────────────────────────────────────────────────────────
@@ -210,11 +213,13 @@ export class TestRunner {
           let errorMsg: string | undefined;
           let screenshotPath: string | undefined;
           let replayVideoPath: string | undefined;
+          let traceSteps: TraceStep[] | undefined;
 
           const timeoutMs = test.timeout ?? this.config.defaultTimeout;
           const retries = test.retries ?? 0;
 
           clearSoftFailures();
+          session.enableTracing();
           try {
             await runWithRetry(test.fn, session, timeoutMs, retries);
             flushSoftFailures();
@@ -230,6 +235,9 @@ export class TestRunner {
             try {
               screenshotPath = await session.screenshot(slug);
             } catch { /* non-fatal — screenshot is best-effort */ }
+          } finally {
+            traceSteps = session.getTrace();
+            session.disableTracing();
           }
 
           if (status === 'fail' && this.config.slowReplay) {
@@ -239,6 +247,7 @@ export class TestRunner {
               await session.reset();
               await session.reapplySuiteMocks();
               session.enableSlowMode(this.config.slowReplayDelay);
+              session.enableTracing();
               await session.startRecording(replaySlug);
               // Give the recording process time to start capturing before any interactions fire.
               await new Promise(r => setTimeout(r, 500));
@@ -249,18 +258,20 @@ export class TestRunner {
                 await runWithRetry(test.fn, session, timeoutMs * 2, 0);
               } catch {}
               replayVideoPath = await session.stopRecording();
+              traceSteps = session.getTrace();
             } catch (replayErr) {
               const replayMsg = replayErr instanceof Error ? replayErr.message : String(replayErr);
               console.log(`      ${dim('slow replay failed: ' + replayMsg)}`);
               try { await session.stopRecording(); } catch {}
             } finally {
               session.disableSlowMode();
+              session.disableTracing();
             }
           }
 
           const durationMs = Date.now() - start;
 
-          results.push({ suite: suite.name, test: test.name, status, durationMs, error: errorMsg, screenshotPath, replayVideoPath });
+          results.push({ suite: suite.name, test: test.name, status, durationMs, error: errorMsg, screenshotPath, replayVideoPath, traceSteps });
 
           const icon = status === 'pass' ? green('✓') : red('✗');
           const dur = dim(`(${durationMs}ms)`);
@@ -285,6 +296,7 @@ export class TestRunner {
 
     this.writeResults(results, runDir);
     this.writeJUnit(results, runDir);
+    this.writeHtmlReport(results, runDir);
     this.printSummary(results, Date.now() - runStart);
 
     const failures = results.filter(r => r.status === 'fail').length;
@@ -337,6 +349,19 @@ export class TestRunner {
     const file = path.join(dir, 'e2e-results.xml');
     fs.writeFileSync(file, xml);
     console.log(`  JUnit XML written to ${file}`);
+  }
+
+  private writeHtmlReport(results: TestResult[], dir: string): void {
+    const file = path.join(dir, 'report.html');
+    fs.writeFileSync(file, generateHtmlReport(results));
+    console.log(`  HTML report:  ${file}`);
+    if (!process.env.CI) {
+      try {
+        const { execFileSync } = require('child_process') as typeof import('child_process');
+        const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';
+        execFileSync(cmd, [file], { stdio: 'ignore' });
+      } catch { /* non-fatal — best-effort */ }
+    }
   }
 
   private printSummary(results: TestResult[], elapsedMs: number): void {

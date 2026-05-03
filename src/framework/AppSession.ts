@@ -2,6 +2,8 @@ import { Device } from './Device';
 import type { StatusBarOptions } from './Device';
 import { HermesSession } from './HermesSession';
 import { Element, type NodeDescriptor } from './Element';
+import { TraceCollector, type TraceStep } from './TraceCollector';
+import { setExpectTracer } from './expect';
 import { BRIDGE_INJECTOR_SCRIPT } from '../bridge/injector';
 import { NETWORK_MOCK_SCRIPT } from '../bridge/network-mock';
 import { CLOCK_SCRIPT } from '../bridge/clock';
@@ -15,6 +17,7 @@ import {
 
 export type { Selector };
 export type { StatusBarOptions };
+export type { TraceStep };
 
 function selectorStep(sel: Selector): string {
   if ('testID' in sel) return sel.testID;
@@ -24,6 +27,13 @@ function selectorStep(sel: Selector): string {
   if ('accessibilityRole' in sel) return `role:${sel.accessibilityRole}`;
   if ('placeholder' in sel) return `placeholder:"${sel.placeholder}"`;
   return JSON.stringify(sel);
+}
+
+function matcherLabel(matcher: string | RegExp | NetworkMatcher): string {
+  if (typeof matcher === 'string') return matcher;
+  if (matcher instanceof RegExp) return matcher.toString();
+  const url = matcher.url instanceof RegExp ? matcher.url.toString() : matcher.url;
+  return matcher.method ? `${matcher.method} ${url}` : url;
 }
 
 export type NetworkMatcher = {
@@ -68,6 +78,7 @@ export class AppSession {
   private resultsDir: string;
   private _currentRecordingPath: string | null = null;
   private _slowModeDelay = 0;
+  private _tracer: TraceCollector | null = null;
 
   constructor(private config: E2EConfig) {
     this.device = new Device(config);
@@ -80,9 +91,23 @@ export class AppSession {
   }
 
   async start(): Promise<void> {
+    await this.detectMetroPort();
     await this.device.init();
     await this.device.launch();
     await this.injectBridge();
+  }
+
+  private async detectMetroPort(): Promise<void> {
+    const configured = this.config.metroPort;
+    if (await probeMetroPort(configured)) return;
+
+    const candidates = [8081, 8082, 8083, 8080, 19000, 19001, 19002].filter(p => p !== configured);
+    const results = await Promise.all(candidates.map(async p => ({ port: p, ok: await probeMetroPort(p) })));
+    const found = results.find(r => r.ok);
+    if (found) {
+      console.log(`  Metro detected on port ${found.port} (METRO_PORT was ${configured})`);
+      this.config.metroPort = found.port;
+    }
   }
 
   async reset(): Promise<void> {
@@ -98,13 +123,6 @@ export class AppSession {
   }
 
   private async injectBridge(): Promise<void> {
-    // In Expo dev client / New Architecture, Metro exposes multiple CDP targets.
-    // Strategy:
-    //   1. Sort targets: bundleId match first, known Expo shell IDs last.
-    //   2. For each target, stay connected and retry injection up to 5 s (same pattern as
-    //      old code — rapid disconnect/reconnect causes issues on Android's Metro proxy).
-    //   3. If no target succeeds, wait 500 ms and re-fetch — handles the case where the
-    //      app target appears after the shell target.
     const EXPO_SHELL_IDS = ['host.exp.exponent', 'io.expo.devclient'];
     const deadline = Date.now() + 60_000;
 
@@ -135,8 +153,6 @@ export class AppSession {
           await this.hermes.disconnect();
           await this.hermes.connect(target.webSocketDebuggerUrl);
 
-          // Stay connected while retrying — mirroring the old behaviour so Android's
-          // Metro proxy isn't hit with rapid reconnects while the JS bundle loads.
           const perTargetDeadline = Date.now() + 5_000;
           let ok = false;
           while (Date.now() < perTargetDeadline) {
@@ -167,9 +183,26 @@ export class AppSession {
     );
   }
 
+  // ── Tracing ───────────────────────────────────────────────────────────────────
+
+  enableTracing(): void {
+    this._tracer = new TraceCollector(this.screenshot.bind(this));
+    setExpectTracer(this._tracer);
+  }
+
+  disableTracing(): void {
+    this._tracer = null;
+    setExpectTracer(null);
+  }
+
+  getTrace(): TraceStep[] {
+    return this._tracer?.steps() ?? [];
+  }
+
   // ── Network mocking ──────────────────────────────────────────────────────────
 
   async mockNetwork(matcher: NetworkMatcher, response: NetworkResponse): Promise<void> {
+    const start = Date.now();
     const serialized = serializeMatcher(matcher);
     const mock: SerializedMock = { matcher: serialized, response };
 
@@ -183,6 +216,7 @@ export class AppSession {
     await this.hermes.evaluate(
       `__testNetworkMocks__.mocks.push(${JSON.stringify(mock)})`,
     );
+    this._tracer?.add({ action: 'mockNetwork', target: matcherLabel(matcher), durationMs: Date.now() - start, timestampMs: start });
   }
 
   async networkRequests(): Promise<NetworkRequest[]> {
@@ -190,14 +224,18 @@ export class AppSession {
   }
 
   async clearNetworkMocks(): Promise<void> {
+    const start = Date.now();
     this.suiteMocks = [];
     await this.hermes.evaluate(
       `__testNetworkMocks__.mocks = []; __testNetworkMocks__.requests = [];`,
     );
+    this._tracer?.add({ action: 'clearNetworkMocks', durationMs: Date.now() - start, timestampMs: start });
   }
 
   async setNetworkOffline(offline: boolean): Promise<void> {
+    const start = Date.now();
     await this.hermes.evaluate(`globalThis.__testNetworkOffline__ = ${offline}`);
+    this._tracer?.add({ action: 'setNetworkOffline', value: String(offline), durationMs: Date.now() - start, timestampMs: start });
   }
 
   private matchesNetworkMatcher(
@@ -218,12 +256,16 @@ export class AppSession {
     matcher: string | RegExp | NetworkMatcher,
     opts?: { timeout?: number },
   ): Promise<NetworkRequest> {
+    const start = Date.now();
     const timeout = opts?.timeout ?? this.config.defaultTimeout;
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
       const reqs = await this.networkRequests();
       const match = reqs.find(r => this.matchesNetworkMatcher(r, matcher));
-      if (match) return match;
+      if (match) {
+        this._tracer?.add({ action: 'waitForRequest', target: matcherLabel(matcher), durationMs: Date.now() - start, timestampMs: start });
+        return match;
+      }
       await new Promise(r => setTimeout(r, 250));
     }
     throw new Error(`waitForRequest: no matching request within ${timeout}ms`);
@@ -233,12 +275,16 @@ export class AppSession {
     matcher: string | RegExp | NetworkMatcher,
     opts?: { timeout?: number },
   ): Promise<NetworkRequest> {
+    const start = Date.now();
     const timeout = opts?.timeout ?? this.config.defaultTimeout;
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
       const reqs = await this.networkRequests();
       const match = reqs.find(r => this.matchesNetworkMatcher(r, matcher) && r.settled);
-      if (match) return match;
+      if (match) {
+        this._tracer?.add({ action: 'waitForResponse', target: matcherLabel(matcher), durationMs: Date.now() - start, timestampMs: start });
+        return match;
+      }
       await new Promise(r => setTimeout(r, 250));
     }
     throw new Error(`waitForResponse: no matching response within ${timeout}ms`);
@@ -267,40 +313,45 @@ export class AppSession {
   // ── Queries ──────────────────────────────────────────────────────────────────
 
   async find(selector: Selector): Promise<Element> {
+    const start = Date.now();
     const expr = selectorToExpression(selector);
     const descriptor = await this.hermes.evaluate<NodeDescriptor | null>(expr);
     if (!descriptor) {
       throw new Error(`find() — element not found: ${JSON.stringify(selector)}`);
     }
     this.log(`find: ${selectorStep(selector)}`);
-    return new Element(descriptor, this.hermes, this.config.verbose, this._slowModeDelay);
+    this._tracer?.add({ action: 'find', target: selectorStep(selector), durationMs: Date.now() - start, timestampMs: start });
+    return new Element(descriptor, this.hermes, this.config.verbose, this._slowModeDelay, this._tracer);
   }
 
   async findAll(selector: Selector): Promise<Element[]> {
+    const start = Date.now();
     const expr = selectorToAllExpression(selector);
     const descriptors = await this.hermes.evaluate<NodeDescriptor[]>(expr);
     this.log(`findAll: ${selectorStep(selector)} (${descriptors.length} found)`);
-    return descriptors.map(d => new Element(d, this.hermes, this.config.verbose, this._slowModeDelay));
+    this._tracer?.add({ action: 'findAll', target: selectorStep(selector), value: `${descriptors.length} found`, durationMs: Date.now() - start, timestampMs: start });
+    return descriptors.map(d => new Element(d, this.hermes, this.config.verbose, this._slowModeDelay, this._tracer));
   }
 
   async waitForElement(
     selectorOrTestID: Selector | string,
     opts?: { timeout?: number; interval?: number },
   ): Promise<Element> {
+    const start = Date.now();
     const selector: Selector = typeof selectorOrTestID === 'string'
       ? { testID: selectorOrTestID }
       : selectorOrTestID;
     const timeout = opts?.timeout ?? this.config.defaultTimeout;
     const interval = opts?.interval ?? this.config.pollInterval;
     const deadline = Date.now() + timeout;
-    // Inline the evaluate so the internal polling never triggers find()'s step log.
     const expr = selectorToExpression(selector);
 
     while (Date.now() < deadline) {
       const descriptor = await this.hermes.evaluate<NodeDescriptor | null>(expr);
       if (descriptor) {
         this.log(`waitFor: ${selectorStep(selector)}`);
-        return new Element(descriptor, this.hermes, this.config.verbose, this._slowModeDelay);
+        this._tracer?.add({ action: 'waitForElement', target: selectorStep(selector), durationMs: Date.now() - start, timestampMs: start });
+        return new Element(descriptor, this.hermes, this.config.verbose, this._slowModeDelay, this._tracer);
       }
       await sleep(interval);
     }
@@ -310,11 +361,14 @@ export class AppSession {
   }
 
   async findNth(selector: Selector, n: number): Promise<Element> {
-    const all = await this.findAll(selector);
-    if (n < 0 || n >= all.length) {
-      throw new Error(`findNth() — index ${n} out of range (found ${all.length})`);
+    const start = Date.now();
+    const expr = selectorToAllExpression(selector);
+    const descriptors = await this.hermes.evaluate<NodeDescriptor[]>(expr);
+    if (n < 0 || n >= descriptors.length) {
+      throw new Error(`findNth() — index ${n} out of range (found ${descriptors.length})`);
     }
-    return all[n];
+    this._tracer?.add({ action: 'findNth', target: selectorStep(selector), value: `[${n}] of ${descriptors.length}`, durationMs: Date.now() - start, timestampMs: start });
+    return new Element(descriptors[n], this.hermes, this.config.verbose, this._slowModeDelay, this._tracer);
   }
 
   async getTree(maxDepth = 30): Promise<unknown> {
@@ -335,12 +389,16 @@ export class AppSession {
   }
 
   async step(name: string, fn: () => Promise<void>): Promise<void> {
+    const start = Date.now();
     if (this.config.verbose) console.log(`      ⋯ ${name}`);
+    let stepError: string | undefined;
     try {
       await fn();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(`[${name}] ${msg}`);
+      stepError = err instanceof Error ? err.message : String(err);
+      throw new Error(`[${name}] ${stepError}`);
+    } finally {
+      this._tracer?.add({ action: 'step', target: name, value: stepError, durationMs: Date.now() - start, timestampMs: start });
     }
   }
 
@@ -361,32 +419,36 @@ export class AppSession {
     fn: () => Promise<boolean>,
     opts?: { timeout?: number; interval?: number },
   ): Promise<void> {
+    const start = Date.now();
     const timeout = opts?.timeout ?? this.config.defaultTimeout;
     const interval = opts?.interval ?? this.config.pollInterval;
     const deadline = Date.now() + timeout;
 
     while (Date.now() < deadline) {
-      if (await fn()) return;
+      if (await fn()) {
+        this._tracer?.add({ action: 'waitFor', durationMs: Date.now() - start, timestampMs: start });
+        return;
+      }
       await sleep(interval);
     }
     throw new Error(`waitFor() condition timed out after ${timeout}ms`);
   }
 
-  // Scroll the visible FlatList/ScrollView until the element with testID appears.
   async scrollAndFind(testID: string, opts?: { timeout?: number }): Promise<Element> {
+    const start = Date.now();
     const timeout = opts?.timeout ?? this.config.defaultTimeout;
     const deadline = Date.now() + timeout;
-    // Inline the evaluate so internal retries don't trigger find()'s step log.
     const expr = selectorToExpression({ testID });
 
     const tryFind = async (): Promise<Element | null> => {
       const descriptor = await this.hermes.evaluate<NodeDescriptor | null>(expr);
-      return descriptor ? new Element(descriptor, this.hermes, this.config.verbose, this._slowModeDelay) : null;
+      return descriptor ? new Element(descriptor, this.hermes, this.config.verbose, this._slowModeDelay, this._tracer) : null;
     };
 
     const initial = await tryFind();
     if (initial) {
       this.log(`scrollAndFind: ${testID}`);
+      this._tracer?.add({ action: 'scrollAndFind', target: testID, durationMs: Date.now() - start, timestampMs: start });
       return initial;
     }
 
@@ -401,6 +463,7 @@ export class AppSession {
         const el = await tryFind();
         if (el) {
           this.log(`scrollAndFind: ${testID}`);
+          this._tracer?.add({ action: 'scrollAndFind', target: testID, durationMs: Date.now() - start, timestampMs: start });
           return el;
         }
         await sleep(this.config.pollInterval);
@@ -415,13 +478,13 @@ export class AppSession {
     selectorOrTestID: Selector | string,
     opts?: { timeout?: number; interval?: number },
   ): Promise<void> {
+    const start = Date.now();
     const selector: Selector = typeof selectorOrTestID === 'string'
       ? { testID: selectorOrTestID }
       : selectorOrTestID;
     const timeout = opts?.timeout ?? this.config.defaultTimeout;
     const interval = opts?.interval ?? this.config.pollInterval;
     const deadline = Date.now() + timeout;
-    // Inline the evaluate so internal checks don't trigger find()'s step log.
     const expr = 'testID' in selector
       ? null
       : selectorToExpression(selector);
@@ -433,12 +496,14 @@ export class AppSession {
         );
         if (gone) {
           this.log(`waitForGone: ${selectorStep(selector)}`);
+          this._tracer?.add({ action: 'waitForGone', target: selectorStep(selector), durationMs: Date.now() - start, timestampMs: start });
           return;
         }
       } else {
         const descriptor = await this.hermes.evaluate<NodeDescriptor | null>(expr!);
         if (!descriptor) {
           this.log(`waitForGone: ${selectorStep(selector)}`);
+          this._tracer?.add({ action: 'waitForGone', target: selectorStep(selector), durationMs: Date.now() - start, timestampMs: start });
           return;
         }
       }
@@ -450,26 +515,36 @@ export class AppSession {
   }
 
   async dismissKeyboard(): Promise<void> {
+    const start = Date.now();
     await this.hermes.evaluate<boolean>('__testBridge__.dismissKeyboard()');
+    this._tracer?.add({ action: 'dismissKeyboard', durationMs: Date.now() - start, timestampMs: start });
   }
 
   async pressBack(): Promise<void> {
+    const start = Date.now();
     await this.device.pressBack();
+    this._tracer?.add({ action: 'pressBack', durationMs: Date.now() - start, timestampMs: start });
   }
 
   async openURL(url: string): Promise<void> {
+    const start = Date.now();
     await this.device.openURL(url);
+    this._tracer?.add({ action: 'openURL', target: url, durationMs: Date.now() - start, timestampMs: start });
   }
 
   async setLocation(lat: number, lng: number): Promise<void> {
+    const start = Date.now();
     await this.device.setLocation(lat, lng);
+    this._tracer?.add({ action: 'setLocation', value: `${lat}, ${lng}`, durationMs: Date.now() - start, timestampMs: start });
   }
 
   async setPermission(
     service: string,
     status: 'grant' | 'revoke' | 'reset',
   ): Promise<void> {
+    const start = Date.now();
     await this.device.setPermission(service, status);
+    this._tracer?.add({ action: 'setPermission', target: service, value: status, durationMs: Date.now() - start, timestampMs: start });
   }
 
   async screenshot(name: string): Promise<string> {
@@ -511,32 +586,44 @@ export class AppSession {
   // ── Push notifications ────────────────────────────────────────────────────────
 
   async pushNotification(payload: object): Promise<void> {
+    const start = Date.now();
     await this.device.pushNotification(this.config.bundleId, payload);
+    this._tracer?.add({ action: 'pushNotification', durationMs: Date.now() - start, timestampMs: start });
   }
 
   // ── Status bar ────────────────────────────────────────────────────────────────
 
   async setStatusBar(opts: StatusBarOptions): Promise<void> {
+    const start = Date.now();
     await this.device.setStatusBar(opts);
+    this._tracer?.add({ action: 'setStatusBar', value: JSON.stringify(opts), durationMs: Date.now() - start, timestampMs: start });
   }
 
   async resetStatusBar(): Promise<void> {
+    const start = Date.now();
     await this.device.resetStatusBar();
+    this._tracer?.add({ action: 'resetStatusBar', durationMs: Date.now() - start, timestampMs: start });
   }
 
   // ── Clipboard ─────────────────────────────────────────────────────────────────
 
   async setClipboard(text: string): Promise<void> {
+    const start = Date.now();
     await this.device.setClipboard(text);
+    this._tracer?.add({ action: 'setClipboard', value: text, durationMs: Date.now() - start, timestampMs: start });
   }
 
   async getClipboard(): Promise<string> {
-    return this.device.getClipboard();
+    const start = Date.now();
+    const result = await this.device.getClipboard();
+    this._tracer?.add({ action: 'getClipboard', durationMs: Date.now() - start, timestampMs: start });
+    return result;
   }
 
   // ── Animation control ─────────────────────────────────────────────────────────
 
   async disableAnimations(): Promise<void> {
+    const start = Date.now();
     await this.hermes.evaluate(`(function() {
       try {
         var RN = require('react-native');
@@ -554,34 +641,44 @@ export class AppSession {
         }
       } catch(e) {}
     })()`);
+    this._tracer?.add({ action: 'disableAnimations', durationMs: Date.now() - start, timestampMs: start });
   }
 
   // ── AsyncStorage ──────────────────────────────────────────────────────────────
 
   async setStorage(key: string, value: string): Promise<void> {
+    const start = Date.now();
     await this.requireStorage();
     await this.awaitStorageOp<void>(
       `__testStorage__.setItem(${JSON.stringify(key)}, ${JSON.stringify(value)})`,
     );
+    this._tracer?.add({ action: 'setStorage', target: key, value, durationMs: Date.now() - start, timestampMs: start });
   }
 
   async getStorage(key: string): Promise<string | null> {
+    const start = Date.now();
     await this.requireStorage();
-    return this.awaitStorageOp<string | null>(
+    const result = await this.awaitStorageOp<string | null>(
       `__testStorage__.getItem(${JSON.stringify(key)})`,
     );
+    this._tracer?.add({ action: 'getStorage', target: key, durationMs: Date.now() - start, timestampMs: start });
+    return result;
   }
 
   async removeStorage(key: string): Promise<void> {
+    const start = Date.now();
     await this.requireStorage();
     await this.awaitStorageOp<void>(
       `__testStorage__.removeItem(${JSON.stringify(key)})`,
     );
+    this._tracer?.add({ action: 'removeStorage', target: key, durationMs: Date.now() - start, timestampMs: start });
   }
 
   async clearStorage(): Promise<void> {
+    const start = Date.now();
     await this.requireStorage();
     await this.awaitStorageOp<void>('__testStorage__.clear()');
+    this._tracer?.add({ action: 'clearStorage', durationMs: Date.now() - start, timestampMs: start });
   }
 
   private async awaitStorageOp<T>(op: string): Promise<T> {
@@ -646,4 +743,18 @@ function matcherKey(m: SerializedMatcher): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
+}
+
+async function probeMetroPort(port: number): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1_000);
+    const res = await fetch(`http://localhost:${port}/json`, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) return false;
+    const pages = await res.json() as unknown[];
+    return Array.isArray(pages) && pages.length > 0;
+  } catch {
+    return false;
+  }
 }

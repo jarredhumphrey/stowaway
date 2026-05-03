@@ -1,4 +1,13 @@
 import { Element } from './Element';
+import type { TraceCollector } from './TraceCollector';
+
+// --- Expect tracer (wired by AppSession) ---
+
+let _expectTracer: TraceCollector | null = null;
+
+export function setExpectTracer(tracer: TraceCollector | null): void {
+  _expectTracer = tracer;
+}
 
 // --- Soft assertion collector ---
 
@@ -47,43 +56,94 @@ class AsyncElementExpect {
     this.onFail(prefix + message);
   }
 
+  private emitAsync(name: string, value: string | undefined, startMs: number): void {
+    const prefix = this.negated ? 'not.' : '';
+    _expectTracer?.add({
+      action: prefix + name,
+      target: this.element.label,
+      value,
+      durationMs: Date.now() - startMs,
+      timestampMs: startMs,
+    });
+  }
+
   async toHaveText(expected: string | RegExp, opts?: { timeout?: number }): Promise<void> {
-    await this.poll(async () => {
-      const text = await this.element.text();
-      return expected instanceof RegExp ? expected.test(text) : text === expected;
-    }, `element to have text ${JSON.stringify(String(expected))}`, opts);
+    const start = Date.now();
+    try {
+      await this.poll(async () => {
+        const text = await this.element.text();
+        return expected instanceof RegExp ? expected.test(text) : text === expected;
+      }, `element to have text ${JSON.stringify(String(expected))}`, opts);
+    } finally {
+      this.emitAsync('toHaveText', String(expected), start);
+    }
   }
 
   async toBeVisible(opts?: { timeout?: number }): Promise<void> {
-    await this.poll(() => this.element.isVisible(), 'element to be visible', opts);
+    const start = Date.now();
+    try {
+      await this.poll(() => this.element.isVisible(), 'element to be visible', opts);
+    } finally {
+      this.emitAsync('toBeVisible', undefined, start);
+    }
   }
 
   async toBeEnabled(opts?: { timeout?: number }): Promise<void> {
-    await this.poll(() => this.element.isEnabled(), 'element to be enabled', opts);
+    const start = Date.now();
+    try {
+      await this.poll(() => this.element.isEnabled(), 'element to be enabled', opts);
+    } finally {
+      this.emitAsync('toBeEnabled', undefined, start);
+    }
   }
 
   async toHaveValue(expected: string, opts?: { timeout?: number }): Promise<void> {
-    await this.poll(
-      async () => (await this.element.inputValue()) === expected,
-      `element to have value ${JSON.stringify(expected)}`,
-      opts,
-    );
+    const start = Date.now();
+    try {
+      await this.poll(
+        async () => (await this.element.inputValue()) === expected,
+        `element to have value ${JSON.stringify(expected)}`,
+        opts,
+      );
+    } finally {
+      this.emitAsync('toHaveValue', expected, start);
+    }
   }
 
   async toBeChecked(opts?: { timeout?: number }): Promise<void> {
-    await this.poll(() => this.element.isChecked(), 'element to be checked', opts);
+    const start = Date.now();
+    try {
+      await this.poll(() => this.element.isChecked(), 'element to be checked', opts);
+    } finally {
+      this.emitAsync('toBeChecked', undefined, start);
+    }
   }
 
   async toBeDisabled(opts?: { timeout?: number }): Promise<void> {
-    await this.poll(async () => !(await this.element.isEnabled()), 'element to be disabled', opts);
+    const start = Date.now();
+    try {
+      await this.poll(async () => !(await this.element.isEnabled()), 'element to be disabled', opts);
+    } finally {
+      this.emitAsync('toBeDisabled', undefined, start);
+    }
   }
 
   async toBeHidden(opts?: { timeout?: number }): Promise<void> {
-    await this.poll(async () => !(await this.element.isVisible()), 'element to be hidden', opts);
+    const start = Date.now();
+    try {
+      await this.poll(async () => !(await this.element.isVisible()), 'element to be hidden', opts);
+    } finally {
+      this.emitAsync('toBeHidden', undefined, start);
+    }
   }
 
   async toHaveFocus(opts?: { timeout?: number }): Promise<void> {
-    await this.poll(() => this.element.isFocused(), 'element to have focus', opts);
+    const start = Date.now();
+    try {
+      await this.poll(() => this.element.isFocused(), 'element to have focus', opts);
+    } finally {
+      this.emitAsync('toHaveFocus', undefined, start);
+    }
   }
 }
 
@@ -100,73 +160,75 @@ class Assertion {
     return new Assertion(this.value, !this.negated, this.onFail);
   }
 
-  private pass(result: boolean, message: string): void {
+  private pass(name: string, result: boolean, message: string): void {
+    const prefix = this.negated ? 'not.' : '';
+    _expectTracer?.add({
+      action: prefix + name,
+      target: message,
+      value: format(this.value),
+      durationMs: 0,
+      timestampMs: Date.now(),
+    });
     const success = this.negated ? !result : result;
     if (!success) {
-      const prefix = this.negated ? 'Expected NOT: ' : 'Expected: ';
-      this.onFail(prefix + message + ` (received: ${format(this.value)})`);
+      const errPrefix = this.negated ? 'Expected NOT: ' : 'Expected: ';
+      this.onFail(errPrefix + message + ` (received: ${format(this.value)})`);
     }
   }
 
   toBe(expected: unknown): void {
-    this.pass(
-      Object.is(this.value, expected),
-      `${format(expected)}`,
-    );
+    this.pass('toBe', Object.is(this.value, expected), `${format(expected)}`);
   }
 
   toEqual(expected: unknown): void {
-    this.pass(
-      JSON.stringify(this.value) === JSON.stringify(expected),
-      `equal to ${format(expected)}`,
-    );
+    this.pass('toEqual', JSON.stringify(this.value) === JSON.stringify(expected), `equal to ${format(expected)}`);
   }
 
   toContain(expected: unknown): void {
     if (typeof this.value === 'string') {
-      this.pass(this.value.includes(expected as string), `to contain ${format(expected)}`);
+      this.pass('toContain', this.value.includes(expected as string), `to contain ${format(expected)}`);
     } else if (Array.isArray(this.value)) {
-      this.pass(this.value.includes(expected), `to contain ${format(expected)}`);
+      this.pass('toContain', this.value.includes(expected), `to contain ${format(expected)}`);
     } else {
       throw new AssertionError(`toContain requires string or array, got ${typeof this.value}`);
     }
   }
 
   toBeTruthy(): void {
-    this.pass(Boolean(this.value), 'to be truthy');
+    this.pass('toBeTruthy', Boolean(this.value), 'to be truthy');
   }
 
   toBeFalsy(): void {
-    this.pass(!this.value, 'to be falsy');
+    this.pass('toBeFalsy', !this.value, 'to be falsy');
   }
 
   toBeNull(): void {
-    this.pass(this.value === null, 'to be null');
+    this.pass('toBeNull', this.value === null, 'to be null');
   }
 
   toBeUndefined(): void {
-    this.pass(this.value === undefined, 'to be undefined');
+    this.pass('toBeUndefined', this.value === undefined, 'to be undefined');
   }
 
   toBeGreaterThan(n: number): void {
-    this.pass((this.value as number) > n, `to be greater than ${n}`);
+    this.pass('toBeGreaterThan', (this.value as number) > n, `to be greater than ${n}`);
   }
 
   toHaveLength(n: number): void {
     const len = (this.value as { length: number }).length;
-    this.pass(len === n, `to have length ${n} (got ${len})`);
+    this.pass('toHaveLength', len === n, `to have length ${n} (got ${len})`);
   }
 
   toBeGreaterThanOrEqual(n: number): void {
-    this.pass((this.value as number) >= n, `to be greater than or equal to ${n}`);
+    this.pass('toBeGreaterThanOrEqual', (this.value as number) >= n, `to be greater than or equal to ${n}`);
   }
 
   toBeLessThan(n: number): void {
-    this.pass((this.value as number) < n, `to be less than ${n}`);
+    this.pass('toBeLessThan', (this.value as number) < n, `to be less than ${n}`);
   }
 
   toBeLessThanOrEqual(n: number): void {
-    this.pass((this.value as number) <= n, `to be less than or equal to ${n}`);
+    this.pass('toBeLessThanOrEqual', (this.value as number) <= n, `to be less than or equal to ${n}`);
   }
 
   toMatchObject(expected: Record<string, unknown>): void {
@@ -178,19 +240,19 @@ class Assertion {
         return false;
       }
     });
-    this.pass(allMatch, `to match object ${format(expected)}`);
+    this.pass('toMatchObject', allMatch, `to match object ${format(expected)}`);
   }
 
   toHaveAccessibilityLabel(label: string): void {
     const props = this.value as Record<string, unknown>;
     const got = props.accessibilityLabel;
-    this.pass(got === label, `to have accessibilityLabel ${format(label)} (got ${format(got)})`);
+    this.pass('toHaveAccessibilityLabel', got === label, `to have accessibilityLabel ${format(label)} (got ${format(got)})`);
   }
 
   toHaveAccessibilityRole(role: string): void {
     const props = this.value as Record<string, unknown>;
     const got = props.accessibilityRole;
-    this.pass(got === role, `to have accessibilityRole ${format(role)} (got ${format(got)})`);
+    this.pass('toHaveAccessibilityRole', got === role, `to have accessibilityRole ${format(role)} (got ${format(got)})`);
   }
 }
 

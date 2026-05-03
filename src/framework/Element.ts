@@ -1,4 +1,5 @@
 import type { HermesSession } from './HermesSession';
+import type { TraceCollector } from './TraceCollector';
 import { type Selector, selectorToExpressionWithin, selectorToAllExpressionWithin } from './selectors';
 
 function selectorLabel(sel: Selector): string {
@@ -34,6 +35,7 @@ export class Element {
     private session: HermesSession,
     private verbose = false,
     private slowDelay = 0,
+    private tracer: TraceCollector | null = null,
   ) {}
 
   get nodeId(): number {
@@ -48,7 +50,18 @@ export class Element {
     if (this.verbose) console.log(`        ${msg}`);
   }
 
+  private async emitStep(action: string, target: string, value: string | undefined, startMs: number): Promise<void> {
+    if (!this.tracer) return;
+    const step = { action, target, value, durationMs: Date.now() - startMs, timestampMs: startMs };
+    if (this.slowDelay > 0) {
+      await this.tracer.addWithScreenshot(step);
+    } else {
+      this.tracer.add(step);
+    }
+  }
+
   async tap(): Promise<void> {
+    const start = Date.now();
     const ok = await this.session.evaluate<boolean>(
       `__testBridge__.tap(${this.descriptor.nodeId})`,
     );
@@ -60,9 +73,11 @@ export class Element {
     }
     this.log(`tap: ${this.label}`);
     if (this.slowDelay > 0) await sleep(this.slowDelay);
+    await this.emitStep('tap', this.label, undefined, start);
   }
 
   async longPress(): Promise<void> {
+    const start = Date.now();
     const ok = await this.session.evaluate<boolean>(
       `__testBridge__.longPress(${this.descriptor.nodeId})`,
     );
@@ -74,9 +89,11 @@ export class Element {
     }
     this.log(`longPress: ${this.label}`);
     if (this.slowDelay > 0) await sleep(this.slowDelay);
+    await this.emitStep('longPress', this.label, undefined, start);
   }
 
   async typeText(text: string): Promise<void> {
+    const start = Date.now();
     const ok = await this.session.evaluate<boolean>(
       `__testBridge__.typeText(${this.descriptor.nodeId}, ${JSON.stringify(text)})`,
     );
@@ -88,9 +105,11 @@ export class Element {
     }
     this.log(`typeText: ${JSON.stringify(text)} → ${this.label}`);
     if (this.slowDelay > 0) await sleep(this.slowDelay);
+    await this.emitStep('typeText', this.label, text, start);
   }
 
   async clearText(): Promise<void> {
+    const start = Date.now();
     const ok = await this.session.evaluate<boolean>(
       `__testBridge__.typeText(${this.descriptor.nodeId}, "")`,
     );
@@ -102,9 +121,11 @@ export class Element {
     }
     this.log(`clearText: ${this.label}`);
     if (this.slowDelay > 0) await sleep(this.slowDelay);
+    await this.emitStep('clearText', this.label, undefined, start);
   }
 
   async focus(): Promise<void> {
+    const start = Date.now();
     const ok = await this.session.evaluate<boolean>(
       `__testBridge__.focus(${this.descriptor.nodeId})`,
     );
@@ -115,9 +136,11 @@ export class Element {
     }
     this.log(`focus: ${this.label}`);
     if (this.slowDelay > 0) await sleep(this.slowDelay);
+    await this.emitStep('focus', this.label, undefined, start);
   }
 
   async blur(): Promise<void> {
+    const start = Date.now();
     const ok = await this.session.evaluate<boolean>(
       `__testBridge__.blur(${this.descriptor.nodeId})`,
     );
@@ -128,9 +151,11 @@ export class Element {
     }
     this.log(`blur: ${this.label}`);
     if (this.slowDelay > 0) await sleep(this.slowDelay);
+    await this.emitStep('blur', this.label, undefined, start);
   }
 
   async submitEditing(): Promise<void> {
+    const start = Date.now();
     const ok = await this.session.evaluate<boolean>(
       `__testBridge__.submitEditing(${this.descriptor.nodeId})`,
     );
@@ -141,9 +166,11 @@ export class Element {
     }
     this.log(`submitEditing: ${this.label}`);
     if (this.slowDelay > 0) await sleep(this.slowDelay);
+    await this.emitStep('submitEditing', this.label, undefined, start);
   }
 
   async scrollTo(offset: number): Promise<void> {
+    const start = Date.now();
     const ok = await this.session.evaluate<boolean>(
       `__testBridge__.scrollElement(${this.descriptor.nodeId}, ${offset})`,
     );
@@ -154,12 +181,14 @@ export class Element {
     }
     this.log(`scrollTo: ${offset}px on ${this.label}`);
     if (this.slowDelay > 0) await sleep(this.slowDelay);
+    await this.emitStep('scrollTo', this.label, `${offset}px`, start);
   }
 
   async swipe(
     direction: 'left' | 'right' | 'up' | 'down',
     distance = 100,
   ): Promise<void> {
+    const start = Date.now();
     const result = await this.session.evaluate<boolean | string>(
       `__testBridge__.swipe(${this.descriptor.nodeId}, '${direction}', ${distance})`,
     );
@@ -170,9 +199,11 @@ export class Element {
     }
     this.log(`swipe: ${direction} ${distance}px on ${this.label}`);
     if (this.slowDelay > 0) await sleep(this.slowDelay);
+    await this.emitStep('swipe', this.label, `${direction} ${distance}px`, start);
   }
 
   async scrollToX(offset: number): Promise<void> {
+    const start = Date.now();
     const ok = await this.session.evaluate<boolean>(
       `__testBridge__.scrollElementToX(${this.descriptor.nodeId}, ${offset})`,
     );
@@ -183,6 +214,7 @@ export class Element {
     }
     this.log(`scrollToX: ${offset}px on ${this.label}`);
     if (this.slowDelay > 0) await sleep(this.slowDelay);
+    await this.emitStep('scrollToX', this.label, `${offset}px`, start);
   }
 
   async text(): Promise<string> {
@@ -198,6 +230,7 @@ export class Element {
   }
 
   async doubleTap(): Promise<void> {
+    const start = Date.now();
     const ok = await this.session.evaluate<boolean>(
       `__testBridge__.doubleTap(${this.descriptor.nodeId})`,
     );
@@ -209,12 +242,11 @@ export class Element {
     }
     this.log(`doubleTap: ${this.label}`);
     if (this.slowDelay > 0) await sleep(this.slowDelay);
+    await this.emitStep('doubleTap', this.label, undefined, start);
   }
 
   async dragTo(target: Element): Promise<void> {
-    // Single bridge call: measure both frames and fire the gesture inside Hermes.
-    // Avoids the async getFrame() + CDP awaitPromise round-trip that fails when
-    // Fabric's stateNode.measure() defers its callback through native dispatch.
+    const start = Date.now();
     const result = await this.session.evaluate<boolean | string>(
       `__testBridge__.dragToElement(${this.descriptor.nodeId}, ${target.nodeId})`,
     );
@@ -223,6 +255,7 @@ export class Element {
     }
     this.log(`dragTo: ${this.label} → ${target.label}`);
     if (this.slowDelay > 0) await sleep(this.slowDelay);
+    await this.emitStep('dragTo', this.label, `→ ${target.label}`, start);
   }
 
   async exists(): Promise<boolean> {
@@ -259,6 +292,7 @@ export class Element {
   }
 
   async pressKey(key: string): Promise<void> {
+    const start = Date.now();
     const ok = await this.session.evaluate<boolean>(
       `__testBridge__.pressKey(${this.descriptor.nodeId}, ${JSON.stringify(key)})`,
     );
@@ -269,6 +303,7 @@ export class Element {
     }
     this.log(`pressKey: '${key}' → ${this.label}`);
     if (this.slowDelay > 0) await sleep(this.slowDelay);
+    await this.emitStep('pressKey', this.label, key, start);
   }
 
   async isChecked(): Promise<boolean> {
@@ -278,6 +313,7 @@ export class Element {
   }
 
   async check(): Promise<void> {
+    const start = Date.now();
     const ok = await this.session.evaluate<boolean>(
       `__testBridge__.setChecked(${this.descriptor.nodeId}, true)`,
     );
@@ -286,9 +322,11 @@ export class Element {
     }
     this.log(`check: ${this.label}`);
     if (this.slowDelay > 0) await sleep(this.slowDelay);
+    await this.emitStep('check', this.label, undefined, start);
   }
 
   async uncheck(): Promise<void> {
+    const start = Date.now();
     const ok = await this.session.evaluate<boolean>(
       `__testBridge__.setChecked(${this.descriptor.nodeId}, false)`,
     );
@@ -297,9 +335,11 @@ export class Element {
     }
     this.log(`uncheck: ${this.label}`);
     if (this.slowDelay > 0) await sleep(this.slowDelay);
+    await this.emitStep('uncheck', this.label, undefined, start);
   }
 
   async selectOption(value: string | number | boolean): Promise<void> {
+    const start = Date.now();
     const ok = await this.session.evaluate<boolean>(
       `__testBridge__.selectOption(${this.descriptor.nodeId}, ${JSON.stringify(value)})`,
     );
@@ -308,9 +348,11 @@ export class Element {
     }
     this.log(`selectOption: ${JSON.stringify(value)} → ${this.label}`);
     if (this.slowDelay > 0) await sleep(this.slowDelay);
+    await this.emitStep('selectOption', this.label, String(value), start);
   }
 
   async setDate(date: Date): Promise<void> {
+    const start = Date.now();
     const ok = await this.session.evaluate<boolean>(
       `__testBridge__.setDateValue(${this.descriptor.nodeId}, ${date.getTime()})`,
     );
@@ -321,9 +363,11 @@ export class Element {
     }
     this.log(`setDate: ${date.toISOString()} → ${this.label}`);
     if (this.slowDelay > 0) await sleep(this.slowDelay);
+    await this.emitStep('setDate', this.label, date.toDateString(), start);
   }
 
   async slideToValue(value: number): Promise<void> {
+    const start = Date.now();
     const ok = await this.session.evaluate<boolean>(
       `__testBridge__.setSliderValue(${this.descriptor.nodeId}, ${value})`,
     );
@@ -334,9 +378,11 @@ export class Element {
     }
     this.log(`slideToValue: ${value} → ${this.label}`);
     if (this.slowDelay > 0) await sleep(this.slowDelay);
+    await this.emitStep('slideToValue', this.label, String(value), start);
   }
 
   async find(selector: Selector): Promise<Element> {
+    const start = Date.now();
     const expr = selectorToExpressionWithin(this.descriptor.nodeId, selector);
     const descriptor = await this.session.evaluate<NodeDescriptor | null>(expr);
     if (!descriptor) {
@@ -345,18 +391,31 @@ export class Element {
       );
     }
     this.log(`find: ${selectorLabel(selector)} within ${this.label}`);
-    return new Element(descriptor, this.session, this.verbose, this.slowDelay);
+    this.tracer?.add({
+      action: 'find',
+      target: `${selectorLabel(selector)} within ${this.label}`,
+      durationMs: Date.now() - start,
+      timestampMs: start,
+    });
+    return new Element(descriptor, this.session, this.verbose, this.slowDelay, this.tracer);
   }
 
   async findAll(selector: Selector): Promise<Element[]> {
+    const start = Date.now();
     const expr = selectorToAllExpressionWithin(this.descriptor.nodeId, selector);
     const descriptors = await this.session.evaluate<NodeDescriptor[]>(expr);
     this.log(`findAll: ${selectorLabel(selector)} within ${this.label} (${descriptors.length} found)`);
-    return descriptors.map(d => new Element(d, this.session, this.verbose, this.slowDelay));
+    this.tracer?.add({
+      action: 'findAll',
+      target: `${selectorLabel(selector)} within ${this.label}`,
+      value: `${descriptors.length} found`,
+      durationMs: Date.now() - start,
+      timestampMs: start,
+    });
+    return descriptors.map(d => new Element(d, this.session, this.verbose, this.slowDelay, this.tracer));
   }
 
   async props(): Promise<Record<string, unknown>> {
-    // Serialize only the primitive/serializable memoizedProps of this node.
     return this.session.evaluate<Record<string, unknown>>(`
       (function() {
         var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
