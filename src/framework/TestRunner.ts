@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { AppSession } from './AppSession';
 import type { TraceStep } from './TraceCollector';
-import { AssertionError, clearSoftFailures, flushSoftFailures } from './expect';
+import { clearSoftFailures, flushSoftFailures } from './expect';
 import { generateHtmlReport } from './htmlReport';
 import type { E2EConfig } from '../config';
 
@@ -40,6 +40,7 @@ interface TestResult {
   status: 'pass' | 'fail' | 'skip';
   durationMs: number;
   error?: string;
+  errorStack?: string;
   screenshotPath?: string;
   replayVideoPath?: string;
   traceSteps?: TraceStep[];
@@ -211,6 +212,7 @@ export class TestRunner {
           const start = Date.now();
           let status: 'pass' | 'fail' = 'pass';
           let errorMsg: string | undefined;
+          let errorStack: string | undefined;
           let screenshotPath: string | undefined;
           let replayVideoPath: string | undefined;
           let traceSteps: TraceStep[] | undefined;
@@ -225,10 +227,8 @@ export class TestRunner {
             flushSoftFailures();
           } catch (err) {
             status = 'fail';
-            errorMsg =
-              err instanceof AssertionError || err instanceof Error
-                ? err.message
-                : String(err);
+            errorMsg = err instanceof Error ? err.message : String(err);
+            errorStack = err instanceof Error ? err.stack : undefined;
 
             // Auto-screenshot on failure
             const slug = `failure-${suite.name}-${test.name}`.replace(/[^a-z0-9]/gi, '-');
@@ -237,6 +237,9 @@ export class TestRunner {
             } catch { /* non-fatal — screenshot is best-effort */ }
           } finally {
             traceSteps = session.getTrace();
+            if (status === 'fail' && traceSteps.length > 0 && !traceSteps.some(s => s.failed)) {
+              traceSteps[traceSteps.length - 1].failed = true;
+            }
             session.disableTracing();
           }
 
@@ -259,6 +262,9 @@ export class TestRunner {
               } catch {}
               replayVideoPath = await session.stopRecording();
               traceSteps = session.getTrace();
+              if (traceSteps.length > 0 && !traceSteps.some(s => s.failed)) {
+                traceSteps[traceSteps.length - 1].failed = true;
+              }
             } catch (replayErr) {
               const replayMsg = replayErr instanceof Error ? replayErr.message : String(replayErr);
               console.log(`      ${dim('slow replay failed: ' + replayMsg)}`);
@@ -271,7 +277,7 @@ export class TestRunner {
 
           const durationMs = Date.now() - start;
 
-          results.push({ suite: suite.name, test: test.name, status, durationMs, error: errorMsg, screenshotPath, replayVideoPath, traceSteps });
+          results.push({ suite: suite.name, test: test.name, status, durationMs, error: errorMsg, errorStack, screenshotPath, replayVideoPath, traceSteps });
 
           const icon = status === 'pass' ? green('✓') : red('✗');
           const dur = dim(`(${durationMs}ms)`);

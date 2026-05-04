@@ -391,6 +391,9 @@ export class AppSession {
   async step(name: string, fn: () => Promise<void>): Promise<void> {
     const start = Date.now();
     if (this.config.verbose) console.log(`      ⋯ ${name}`);
+    // Reserve the header slot first so children appear after it in the trace array.
+    const idx = this._tracer?.reserve({ action: 'step', target: name, timestampMs: start }) ?? -1;
+    this._tracer?.enterStep();
     let stepError: string | undefined;
     try {
       await fn();
@@ -398,7 +401,8 @@ export class AppSession {
       stepError = err instanceof Error ? err.message : String(err);
       throw new Error(`[${name}] ${stepError}`);
     } finally {
-      this._tracer?.add({ action: 'step', target: name, value: stepError, durationMs: Date.now() - start, timestampMs: start });
+      this._tracer?.exitStep();
+      this._tracer?.update(idx, { value: stepError, durationMs: Date.now() - start, failed: !!stepError });
     }
   }
 
