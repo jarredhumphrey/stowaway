@@ -6,6 +6,20 @@ E2E testing framework for React Native apps. Connects to the running app via the
 
 ---
 
+## Documentation
+
+| Guide | What's covered |
+|---|---|
+| [Getting Started](./docs/getting-started.md) | Installation, config, writing your first test, entry point setup |
+| [Querying](./docs/querying.md) | `find`, `findAll`, `waitForElement`, `waitFor`, `scrollAndFind`, selectors, reading element state |
+| [Interactions](./docs/interactions.md) | `tap`, `longPress`, `typeText`, `focus`, `blur`, `scrollTo`, device actions, screenshots |
+| [Network Mocking](./docs/network-mocking.md) | `mockNetwork`, `networkRequests`, `clearNetworkMocks`, scope rules, URL matching |
+| [Assertions](./docs/assertions.md) | All `expect` matchers with examples, negation, accessibility matchers |
+| [Test Organisation](./docs/test-organisation.md) | `describe`, `it`, hooks, `.skip`, `.only`, per-test timeout, retries |
+| [Results & CI](./docs/results.md) | Console output, JSON results, JUnit XML, failure screenshots, CI integration |
+
+---
+
 ## How it works
 
 React Native + Hermes exposes a Chrome DevTools Protocol (CDP) endpoint via Metro on `localhost:8081`. Stowaway connects over WebSocket and uses `Runtime.evaluate` to execute JavaScript inside the live Hermes engine. A small bridge script is injected once per test run; it uses `__REACT_DEVTOOLS_GLOBAL_HOOK__` to walk the React fiber tree and expose test utilities as `globalThis.__testBridge__`.

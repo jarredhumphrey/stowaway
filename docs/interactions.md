@@ -382,6 +382,20 @@ expect(others.length).toBe(2);
 expect(await others[0].text()).toBe('Theme: system');
 ```
 
+### `element.sibling(selector)`
+
+Finds the first sibling that matches `selector`, using the same selector union as `app.find`. Throws if no sibling matches. Use this instead of `siblings()` + manual filtering when you know what you're looking for.
+
+```ts
+// Jump directly to a specific sibling by testID
+const freeBtn = await app.find({ testID: 'plan-free' });
+const teamBtn = await freeBtn.sibling({ testID: 'plan-team' });
+await teamBtn.tap();
+
+// Or by text content
+const proBtn = await freeBtn.sibling({ text: 'Pro' });
+```
+
 ### `element.nextSibling()` / `element.prevSibling()`
 
 Returns the immediately following or preceding sibling in fiber order. Returns `null` if the element is already last (or first).
