@@ -830,6 +830,21 @@
     return results;
   }
 
+  function findSibling(nodeId, type, value, exact, regexFlags) {
+    var fiber = getCurrentFiber(nodeId);
+    if (!fiber) return null;
+    var parent = fiber.return;
+    if (!parent) return null;
+    var sibling = parent.child;
+    while (sibling) {
+      if (sibling !== fiber && matchesSelectorType(sibling, type, value, exact, regexFlags)) {
+        return makeDescriptor(sibling);
+      }
+      sibling = sibling.sibling;
+    }
+    return null;
+  }
+
   function getNextSibling(nodeId) {
     var fiber = getCurrentFiber(nodeId);
     if (!fiber) return null;
@@ -974,6 +989,7 @@
     setSliderValue: setSliderValue,
     getParent: getParent,
     getSiblings: getSiblings,
+    findSibling: findSibling,
     getNextSibling: getNextSibling,
     getPreviousSibling: getPreviousSibling,
     closest: closest,

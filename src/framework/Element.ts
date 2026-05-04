@@ -470,6 +470,22 @@ export class Element {
     return descriptors.map(d => new Element(d, this.session, this.verbose, this.slowDelay, this.tracer));
   }
 
+  async sibling(selector: Selector): Promise<Element> {
+    const start = Date.now();
+    const args = selectorToBridgeArgs(this.descriptor.nodeId, selector);
+    const descriptor = await this.session.evaluate<NodeDescriptor | null>(
+      `__testBridge__.findSibling(${args})`,
+    );
+    if (!descriptor) {
+      throw new Error(
+        `sibling(${JSON.stringify(selector)}) — no matching sibling found for node ${this.descriptor.nodeId}`,
+      );
+    }
+    this.log(`sibling: ${selectorLabel(selector)} from ${this.label}`);
+    this.tracer?.add({ action: 'sibling', target: selectorLabel(selector), durationMs: Date.now() - start, timestampMs: start });
+    return new Element(descriptor, this.session, this.verbose, this.slowDelay, this.tracer);
+  }
+
   async nextSibling(): Promise<Element | null> {
     const start = Date.now();
     const descriptor = await this.session.evaluate<NodeDescriptor | null>(

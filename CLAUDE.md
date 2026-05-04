@@ -146,6 +146,7 @@ Key methods on `AppSession`:
 | `slideToValue(value)` | Fires `onValueChange(value)` then `onSlidingComplete(value)` on the nearest ancestor with `onValueChange`. Works with `@react-native-community/slider`. |
 | `parent()` | Returns the nearest meaningful ancestor (named composite component or native HostComponent); skips anonymous HOC wrappers, Context providers, Fragments. Throws if none found. |
 | `siblings()` | Returns all fiber siblings (nodes that share the same parent), excluding the element itself. |
+| `sibling(selector)` | Returns the first sibling matching `selector`; throws if none found. Supports all `Selector` types. |
 | `nextSibling()` | Returns the immediately following sibling in fiber order, or `null` if none. |
 | `prevSibling()` | Returns the immediately preceding sibling in fiber order, or `null` if none. |
 | `closest(selector)` | Walks up the ancestor chain (via `fiber.return`) and returns the first ancestor matching `selector`. Supports all `Selector` types including `RegExp` text matching. Throws if no match found before the root. |

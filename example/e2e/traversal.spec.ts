@@ -54,6 +54,19 @@ describe('Tree traversal', () => {
     expect(await planSummary.text()).toBe('Plan: pro');
   });
 
+  it('sibling() finds a sibling by testID and taps it', async (app: AppSession) => {
+    await goToForm(app);
+
+    // Jump straight to plan-team by name from plan-free, skipping plan-pro entirely
+    const freeBtn = await app.find({ testID: 'plan-free' });
+    const teamBtn = await freeBtn.sibling({ testID: 'plan-team' });
+
+    await teamBtn.tap();
+
+    const planSummary = await app.find({ testID: 'summary-plan' });
+    expect(await planSummary.text()).toBe('Plan: team');
+  });
+
   it('nextSibling() steps forward in render order', async (app: AppSession) => {
     await goToForm(app);
 
