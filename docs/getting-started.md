@@ -9,26 +9,52 @@
 
 ## Installation
 
-Stowaway is not yet published to npm. Add it as a local dependency from a sibling directory:
+```bash
+npm install --save-dev stowaway
+```
+
+## Quickstart
+
+Run the init command from your app's root directory:
+
+```bash
+npx stowaway init
+```
+
+It will ask for your bundle ID and output directory, then generate:
+
+- `e2e/run.ts` — the test entry point
+- `e2e/smoke.spec.ts` — a smoke test that launches the app and prints the component tree
+- `e2e:ios` / `e2e:android` scripts in your `package.json`
+
+Boot your simulator or emulator, start Metro, then run:
+
+```bash
+npm run e2e:ios
+```
+
+The smoke test prints your component tree to stdout — use that output to find `testID`s and write your first real spec.
+
+## Manual setup
+
+If you prefer to set things up by hand, create `e2e/run.ts`:
+
+```ts
+import { TestRunner, loadConfig } from 'stowaway';
+import * as path from 'path';
+
+const runner = new TestRunner(loadConfig());
+runner.run(path.resolve(__dirname));
+```
+
+And add a script to `package.json`:
 
 ```json
-// your-app/package.json
 {
-  "devDependencies": {
-    "stowaway": "file:../stowaway"
+  "scripts": {
+    "e2e:ios": "PLATFORM=ios BUNDLE_ID=com.myorg.myapp tsx e2e/run.ts"
   }
 }
-```
-
-```bash
-npm install
-```
-
-Any changes to stowaway's `src/` require a rebuild in the stowaway directory before running tests:
-
-```bash
-# in the stowaway directory
-npm run build
 ```
 
 ## Configuration
@@ -46,16 +72,6 @@ All configuration comes from environment variables, read once at startup via `lo
 | `VERBOSE` | — | `1` or `true` — prints each test step as it completes; also enabled by `--verbose` CLI flag |
 | `SLOW_REPLAY` | — | `1` or `true` — adds a delay between trace steps when generating the failure replay video |
 | `SLOW_REPLAY_DELAY` | `800` | Delay in ms between steps when `SLOW_REPLAY` is enabled |
-
-A typical `package.json` script:
-
-```json
-{
-  "scripts": {
-    "e2e:ios": "PLATFORM=ios BUNDLE_ID=com.myorg.myapp tsx e2e/run.ts"
-  }
-}
-```
 
 ## Writing your first spec
 

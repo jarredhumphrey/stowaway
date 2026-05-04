@@ -3,3 +3,6 @@ dist/
 *.tsbuildinfo
 .DS_Store
 src/bridge/injector-script.ts
+src/bridge/clock-script.ts
+src/bridge/network-mock-script.ts
+src/bridge/storage-script.ts

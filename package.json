@@ -2,28 +2,53 @@
   "name": "stowaway",
   "version": "0.1.0",
   "description": "E2E testing framework for React Native apps using the Hermes CDP bridge",
-  "keywords": ["react-native", "e2e", "hermes", "testing", "cdp"],
+  "keywords": [
+    "react-native",
+    "e2e",
+    "hermes",
+    "testing",
+    "cdp"
+  ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jarredhumphrey/stowaway.git"
+  },
   "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "require": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
     }
   },
-  "files": ["dist", "src"],
+  "bin": {
+    "stowaway": "./bin/stowaway.js"
+  },
+  "files": [
+    "dist",
+    "bin"
+  ],
   "engines": {
     "node": ">=22.0.0"
   },
   "scripts": {
-    "build": "node scripts/embed-bridge.js && tsc",
-    "build:watch": "tsc --watch",
+    "prepare": "npm run build",
+    "build": "node scripts/embed-bridge.js && tsup",
+    "build:watch": "tsup --watch",
     "typecheck": "node scripts/embed-bridge.js && tsc --noEmit",
     "clean": "rm -rf dist"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "tsup": "^8.5.1",
     "tsx": "^4.21.0",
     "typescript": "~5.9.2"
   }

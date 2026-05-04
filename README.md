@@ -39,21 +39,39 @@ React Native + Hermes exposes a Chrome DevTools Protocol (CDP) endpoint via Metr
 
 ## Installation
 
-Not yet published to npm. Add as a local dependency:
-
-```json
-"devDependencies": {
-  "stowaway": "file:../stowaway"
-}
+```bash
+npm install --save-dev stowaway
 ```
 
-Then run `npm install`. Any changes to stowaway's `src/` require rebuilding (`npm run build` in the stowaway directory) before running tests in the consuming project.
+---
+
+## Quickstart
+
+Run the init command from your app's root directory:
+
+```bash
+npx stowaway init
+```
+
+It will ask for your bundle ID and output directory, then scaffold:
+
+- `e2e/run.ts` — the test entry point
+- `e2e/smoke.spec.ts` — a smoke test that launches the app and prints the component tree
+- `e2e:ios` / `e2e:android` scripts in your `package.json`
+
+Boot your simulator or emulator, start Metro, then:
+
+```bash
+npm run e2e:ios
+```
+
+The smoke test prints your component tree — use that output to find `testID`s and write your first real spec. See [Getting Started](./docs/getting-started.md) for manual setup and configuration options.
 
 ---
 
 ## Usage
 
-### 1. Config
+### Config
 
 All configuration is read from environment variables:
 
@@ -69,13 +87,7 @@ All configuration is read from environment variables:
 | `SLOW_REPLAY` | — | `1` or `true` — adds a delay between steps in failure replay videos |
 | `SLOW_REPLAY_DELAY` | `800` | Delay in ms between steps when `SLOW_REPLAY` is enabled |
 
-```ts
-import { loadConfig } from 'stowaway';
-
-const config = loadConfig(); // throws if BUNDLE_ID is not set
-```
-
-### 2. Write tests
+### Write tests
 
 ```ts
 import { describe, it, expect } from 'stowaway';
@@ -95,15 +107,15 @@ describe('Home Screen', () => {
 
 The `app` parameter passed to each test is an `AppSession`. The app is reset (terminated and relaunched) between every test automatically.
 
-### 3. Run entry point
+### Entry point
 
-Pass a directory path and `TestRunner` auto-discovers all `*.spec.ts` files inside it:
+Pass a directory and `TestRunner` auto-discovers all `*.spec.ts` files inside it:
 
 ```ts
 import { TestRunner, loadConfig } from 'stowaway';
 
 const runner = new TestRunner(loadConfig());
-runner.run(__dirname); // finds every *.spec.ts in the same directory
+runner.run(__dirname);
 ```
 
 Or pass an explicit ordered array:
