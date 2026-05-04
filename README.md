@@ -2,7 +2,7 @@
 
 E2E testing framework for React Native apps. Connects to the running app via the Hermes CDP bridge exposed by Metro, traverses the React fiber tree to find elements, and triggers interactions directly — no Appium, no coordinate math, no YAML.
 
-**Status:** Early development. Currently consumed by a single project via a `file:` path dependency.
+**Status:** Active development. Now available on npm.
 
 ---
 
