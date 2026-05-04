@@ -33,6 +33,39 @@
     walk(fiber.sibling, visitor);
   }
 
+  // Collect all HostText (tag-6) descendant strings from a fiber.
+  function collectText(fiber) {
+    var parts = [];
+    if (fiber.tag === 6 && typeof fiber.memoizedProps === 'string') {
+      parts.push(fiber.memoizedProps);
+    }
+    walk(fiber.child, function (f) {
+      if (f.tag === 6 && typeof f.memoizedProps === 'string') parts.push(f.memoizedProps);
+    });
+    return parts.join('');
+  }
+
+  // Register a fiber and return a NodeDescriptor for it.
+  function makeDescriptor(fiber) {
+    var nodeId = register(fiber);
+    var testID = fiber.memoizedProps ? fiber.memoizedProps.testID : undefined;
+    return { nodeId: nodeId, componentType: getTypeName(fiber), testID: testID || undefined };
+  }
+
+  // True for fibers that are semantically meaningful parents/ancestors.
+  // Includes HostComponents (native views) and named composite components.
+  // Excludes anonymous HOC shells, Context providers/consumers, Fragments, etc.
+  function isMeaningfulFiber(fiber) {
+    var tag = fiber.tag;
+    if (tag === 5) return true; // HostComponent (View, Text, etc.)
+    // FunctionComponent(0), ClassComponent(1), ForwardRef(11), Memo(14/15) — only if named
+    if (tag === 0 || tag === 1 || tag === 11 || tag === 14 || tag === 15) {
+      var name = getTypeName(fiber);
+      return name !== '' && name !== 'Unknown';
+    }
+    return false;
+  }
+
   function getTypeName(fiber) {
     return typeof fiber.type === 'string'
       ? fiber.type
@@ -356,18 +389,7 @@
   function getText(nodeId) {
     var fiber = getCurrentFiber(nodeId);
     if (!fiber) return '';
-    var parts = [];
-    // Collect text from this fiber itself, then walk ONLY its children/descendants.
-    // Never walk fiber.sibling here — siblings are adjacent tree nodes, not children.
-    if (fiber.tag === 6 && typeof fiber.memoizedProps === 'string') {
-      parts.push(fiber.memoizedProps);
-    }
-    walk(fiber.child, function (f) {
-      if (f.tag === 6 && typeof f.memoizedProps === 'string') {
-        parts.push(f.memoizedProps);
-      }
-    });
-    return parts.join('');
+    return collectText(fiber);
   }
 
   function exists(testID) {
@@ -780,6 +802,96 @@
     return false;
   }
 
+  // ── Tree traversal (parent / sibling / closest) ───────────────────────────
+
+  function getParent(nodeId) {
+    var fiber = getCurrentFiber(nodeId);
+    if (!fiber) return null;
+    var current = fiber.return;
+    while (current) {
+      if (current.tag === 3) return null; // HostRoot — no meaningful parent
+      if (isMeaningfulFiber(current)) return makeDescriptor(current);
+      current = current.return;
+    }
+    return null;
+  }
+
+  function getSiblings(nodeId) {
+    var fiber = getCurrentFiber(nodeId);
+    if (!fiber) return [];
+    var parent = fiber.return;
+    if (!parent) return [];
+    var results = [];
+    var sibling = parent.child;
+    while (sibling) {
+      if (sibling !== fiber) results.push(makeDescriptor(sibling));
+      sibling = sibling.sibling;
+    }
+    return results;
+  }
+
+  function getNextSibling(nodeId) {
+    var fiber = getCurrentFiber(nodeId);
+    if (!fiber) return null;
+    return fiber.sibling ? makeDescriptor(fiber.sibling) : null;
+  }
+
+  function getPreviousSibling(nodeId) {
+    var fiber = getCurrentFiber(nodeId);
+    if (!fiber) return null;
+    var parent = fiber.return;
+    if (!parent) return null;
+    var prev = null;
+    var current = parent.child;
+    while (current) {
+      if (current === fiber) return prev ? makeDescriptor(prev) : null;
+      prev = current;
+      current = current.sibling;
+    }
+    return null;
+  }
+
+  function matchesSelectorType(fiber, type, value, exact, regexFlags) {
+    var p = fiber.memoizedProps;
+    if (type === 'testID') return !!(p && p.testID === value);
+    if (type === 'component') return getTypeName(fiber) === value;
+    if (type === 'text') {
+      var text = collectText(fiber);
+      if (regexFlags !== undefined) {
+        try { return new RegExp(value, regexFlags).test(text); } catch (e) { return false; }
+      }
+      return exact === false ? text.includes(value) : text === value;
+    }
+    if (type === 'accessibilityLabel') {
+      var al = p && p.accessibilityLabel;
+      if (typeof al !== 'string') return false;
+      return exact === false ? al.includes(value) : al === value;
+    }
+    if (type === 'accessibilityRole') return !!(p && p.accessibilityRole === value);
+    if (type === 'placeholder') {
+      var pl = p && p.placeholder;
+      if (typeof pl !== 'string') return false;
+      return exact === false ? pl.includes(value) : pl === value;
+    }
+    return false;
+  }
+
+  // Walk up fiber.return searching for the nearest ancestor matching selector.
+  // type/value/exact mirror the Selector union fields; regexFlags is set for RegExp text matching.
+  function closest(nodeId, type, value, exact, regexFlags) {
+    var fiber = getCurrentFiber(nodeId);
+    if (!fiber) return null;
+    var current = fiber.return;
+    while (current) {
+      if (current.tag === 3) break; // HostRoot — give up
+      if (matchesSelectorType(current, type, value, exact, regexFlags)) {
+        return makeDescriptor(current);
+      }
+      current = current.return;
+    }
+    return null;
+  }
+
   function setDateValue(nodeId, timestamp) {
     var date = new Date(timestamp);
     var fiber = getCurrentFiber(nodeId);
@@ -860,6 +972,11 @@
     selectOption: selectOption,
     setDateValue: setDateValue,
     setSliderValue: setSliderValue,
+    getParent: getParent,
+    getSiblings: getSiblings,
+    getNextSibling: getNextSibling,
+    getPreviousSibling: getPreviousSibling,
+    closest: closest,
   };
 
   return true;

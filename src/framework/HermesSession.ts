@@ -19,6 +19,7 @@ export class HermesSession {
   private nextId = 1;
   private pendingCalls = new Map<number, { resolve: (r: unknown) => void; reject: (e: Error) => void }>();
   private executionContextId: number | undefined;
+  private _disconnecting = false;
 
   constructor(private config: E2EConfig) {}
 
@@ -30,12 +31,14 @@ export class HermesSession {
   }
 
   async disconnect(): Promise<void> {
+    this._disconnecting = true;
     if (this.ws) {
       this.ws.close();
       this.ws = null;
       this.executionContextId = undefined;
       this.pendingCalls.clear();
     }
+    this._disconnecting = false;
   }
 
   async evaluate<T>(expression: string): Promise<T> {
@@ -123,8 +126,11 @@ export class HermesSession {
       ws.onopen = () => resolve();
       ws.onerror = (e: Event) => reject(new Error(`WebSocket error: ${String(e)}`));
       ws.onclose = () => {
+        const msg = this._disconnecting
+          ? 'WebSocket closed'
+          : 'CDP connection lost — the app may have crashed (call isAppRunning() to confirm)';
         for (const p of this.pendingCalls.values()) {
-          p.reject(new Error('WebSocket closed'));
+          p.reject(new Error(msg));
         }
         this.pendingCalls.clear();
       };

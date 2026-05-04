@@ -111,6 +111,11 @@ Key methods on `AppSession`:
 | `resetStatusBar()` | iOS only — clears all status bar overrides; no-op on Android |
 | `setClipboard(text)` | iOS only — writes to the macOS host clipboard (synced with simulator by default) |
 | `getClipboard()` | iOS only — reads from the macOS host clipboard |
+| `setOrientation(orientation)` | `'portrait'` or `'landscape'`. iOS: queries bridge for current `Dimensions` then sends one AppleScript key code to the Simulator (requires accessibility access for System Events). Android: `adb settings put system user_rotation`. Waits 400 ms after rotate on iOS for layout to propagate. |
+| `setBiometricEnrollment(enrolled)` | iOS only — enrolls (`true`) or un-enrolls (`false`) the biometric sensor via `xcrun simctl biometricEnrollment`. No-op on Android. Requires Xcode 12+. |
+| `matchBiometric()` | iOS only — simulates a successful biometric match via `xcrun simctl biometric <udid> match`. Throws on Android. |
+| `rejectBiometric()` | iOS only — simulates a failed biometric attempt via `xcrun simctl biometric <udid> nomatch`. Throws on Android. |
+| `isAppRunning()` | Returns `true` if the app process is alive (`pgrep -f <bundleId>` on iOS, `adb shell pidof` on Android). Useful after a "CDP connection lost" error to confirm a crash. |
 
 ### Element API
 
@@ -139,6 +144,11 @@ Key methods on `AppSession`:
 | `selectOption(value)` | Calls `onValueChange(value)` on the nearest ancestor with that handler. Works with any component that uses `onValueChange` (custom pickers, segmented controls, etc.). Throws if not found. |
 | `setDate(date)` | Fires `onDateChange`, `onChange` (with synthetic event), or `onConfirm` on the nearest ancestor. Works with `DatePickerIOS`, `@react-native-community/datetimepicker`, and modal-style pickers. |
 | `slideToValue(value)` | Fires `onValueChange(value)` then `onSlidingComplete(value)` on the nearest ancestor with `onValueChange`. Works with `@react-native-community/slider`. |
+| `parent()` | Returns the nearest meaningful ancestor (named composite component or native HostComponent); skips anonymous HOC wrappers, Context providers, Fragments. Throws if none found. |
+| `siblings()` | Returns all fiber siblings (nodes that share the same parent), excluding the element itself. |
+| `nextSibling()` | Returns the immediately following sibling in fiber order, or `null` if none. |
+| `prevSibling()` | Returns the immediately preceding sibling in fiber order, or `null` if none. |
+| `closest(selector)` | Walks up the ancestor chain (via `fiber.return`) and returns the first ancestor matching `selector`. Supports all `Selector` types including `RegExp` text matching. Throws if no match found before the root. |
 | `text()` | Concatenates all HostText (fiber tag-6) descendants |
 | `inputValue()` | Returns `memoizedProps.value ?? memoizedProps.defaultValue ?? ''` — reads the controlled/uncontrolled value of a TextInput without relying on HostText children |
 | `exists()` | Re-queries by `testID`; always false if no testID |
@@ -235,6 +245,11 @@ The IIFE installs `globalThis.__testBridge__` with these methods. Extend `inject
 | `selectOption(nodeId, value)` | `boolean` — calls `onValueChange(value)` on nearest ancestor |
 | `dismissKeyboard()` | `boolean` |
 | `getTree(maxDepth?)` | serialized tree — useful for debugging testIDs |
+| `getParent(nodeId)` | `NodeDescriptor \| null` — nearest meaningful ancestor (skips HOC wrappers, Context, Fragments) |
+| `getSiblings(nodeId)` | `NodeDescriptor[]` — all fiber siblings excluding the node itself |
+| `getNextSibling(nodeId)` | `NodeDescriptor \| null` — immediately following sibling in fiber order |
+| `getPreviousSibling(nodeId)` | `NodeDescriptor \| null` — immediately preceding sibling in fiber order |
+| `closest(nodeId, type, value, exact, regexFlags?)` | `NodeDescriptor \| null` — walks `fiber.return` chain checking `matchesSelectorType`; stops at HostRoot |
 
 ### TestRunner registration model
 

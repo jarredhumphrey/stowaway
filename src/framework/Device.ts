@@ -301,6 +301,74 @@ export class Device {
     return stdout;
   }
 
+  // ── Device rotation ───────────────────────────────────────────────────────
+
+  async setOrientation(
+    orientation: 'portrait' | 'landscape',
+    currentlyPortrait = true,
+  ): Promise<void> {
+    if (this.config.platform === 'ios') {
+      const wantPortrait = orientation === 'portrait';
+      if (currentlyPortrait === wantPortrait) return;
+      // key code 123 = left arrow (rotate CCW), 124 = right arrow (rotate CW).
+      // From portrait: one CW rotation → landscape. From landscape: one CCW → portrait.
+      const keyCode = wantPortrait ? 123 : 124;
+      await execFile('osascript', [
+        '-e', 'tell application "Simulator" to activate',
+        '-e', 'tell application "System Events"',
+        '-e', `key code ${keyCode} using command down`,
+        '-e', 'end tell',
+      ]);
+    } else {
+      const rotation = orientation === 'portrait' ? '0' : '1';
+      await execFile('adb', this.adb('shell', 'settings', 'put', 'system', 'accelerometer_rotation', '0'));
+      await execFile('adb', this.adb('shell', 'settings', 'put', 'system', 'user_rotation', rotation));
+    }
+  }
+
+  // ── Biometric simulation (iOS only) ──────────────────────────────────────
+
+  async setBiometricEnrollment(enrolled: boolean): Promise<void> {
+    if (this.config.platform !== 'ios') return;
+    const udid = this.udid ?? (await this.getBootedSimulator());
+    // xcrun simctl biometricEnrollment requires Xcode 12+
+    await execFile('xcrun', ['simctl', 'biometricEnrollment', udid, enrolled ? '--set' : '--unset']);
+  }
+
+  async matchBiometric(): Promise<void> {
+    if (this.config.platform !== 'ios') {
+      throw new Error('matchBiometric() is iOS Simulator only');
+    }
+    const udid = this.udid ?? (await this.getBootedSimulator());
+    await execFile('xcrun', ['simctl', 'biometric', udid, 'match']);
+  }
+
+  async rejectBiometric(): Promise<void> {
+    if (this.config.platform !== 'ios') {
+      throw new Error('rejectBiometric() is iOS Simulator only');
+    }
+    const udid = this.udid ?? (await this.getBootedSimulator());
+    await execFile('xcrun', ['simctl', 'biometric', udid, 'nomatch']);
+  }
+
+  // ── Crash detection ───────────────────────────────────────────────────────
+
+  async isAppRunning(): Promise<boolean> {
+    try {
+      if (this.config.platform === 'ios') {
+        // iOS Simulator apps run as host processes; bundleId appears in the process path.
+        const { stdout } = await execFile('pgrep', ['-f', this.config.bundleId]);
+        return stdout.trim().length > 0;
+      } else {
+        const { stdout } = await execFile('adb', this.adb('shell', 'pidof', '-s', this.config.bundleId));
+        return stdout.trim().length > 0;
+      }
+    } catch {
+      // pgrep/pidof exit with code 1 when no process is found
+      return false;
+    }
+  }
+
   // Prepend -s <serial> when we know which device to target.
   private adb(...args: string[]): string[] {
     return this.serial ? ['-s', this.serial, ...args] : args;

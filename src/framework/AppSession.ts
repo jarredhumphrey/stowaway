@@ -624,6 +624,50 @@ export class AppSession {
     return result;
   }
 
+  // ── Device rotation ───────────────────────────────────────────────────────
+
+  async setOrientation(orientation: 'portrait' | 'landscape'): Promise<void> {
+    const start = Date.now();
+    let currentlyPortrait = true;
+    if (this.config.platform === 'ios') {
+      try {
+        const dims = await this.hermes.evaluate<{ width: number; height: number }>(
+          `(function(){var D=require('react-native').Dimensions.get('window');return{width:D.width,height:D.height};})()`
+        );
+        currentlyPortrait = dims.height >= dims.width;
+      } catch { /* assume portrait if bridge query fails */ }
+    }
+    await this.device.setOrientation(orientation, currentlyPortrait);
+    if (this.config.platform === 'ios') await sleep(400);
+    this._tracer?.add({ action: 'setOrientation', value: orientation, durationMs: Date.now() - start, timestampMs: start });
+  }
+
+  // ── Biometric simulation (iOS only) ──────────────────────────────────────
+
+  async setBiometricEnrollment(enrolled: boolean): Promise<void> {
+    const start = Date.now();
+    await this.device.setBiometricEnrollment(enrolled);
+    this._tracer?.add({ action: 'setBiometricEnrollment', value: String(enrolled), durationMs: Date.now() - start, timestampMs: start });
+  }
+
+  async matchBiometric(): Promise<void> {
+    const start = Date.now();
+    await this.device.matchBiometric();
+    this._tracer?.add({ action: 'matchBiometric', durationMs: Date.now() - start, timestampMs: start });
+  }
+
+  async rejectBiometric(): Promise<void> {
+    const start = Date.now();
+    await this.device.rejectBiometric();
+    this._tracer?.add({ action: 'rejectBiometric', durationMs: Date.now() - start, timestampMs: start });
+  }
+
+  // ── Crash detection ───────────────────────────────────────────────────────
+
+  async isAppRunning(): Promise<boolean> {
+    return this.device.isAppRunning();
+  }
+
   // ── Animation control ─────────────────────────────────────────────────────────
 
   async disableAnimations(): Promise<void> {

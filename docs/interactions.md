@@ -352,6 +352,71 @@ expect(await qty.text()).toBe('2');
 
 ---
 
+## Tree traversal
+
+These methods walk the React fiber tree upward or sideways from an `Element`. They complement scoped `find` / `findAll` (which walk downward) and are especially useful when you have a reference to a deeply nested node and need to reach its container or adjacent elements without adding extra `testID`s to the app.
+
+All traversal methods return fresh `Element` instances backed by the live fiber, so you can chain queries and interactions on the results.
+
+### `element.parent()`
+
+Returns the nearest meaningful ancestor — a named composite component (function or class component with a displayName/name) or a native `HostComponent` (View, Text, etc.). Anonymous HOC shells, `Context.Provider`, `Fragment`, and other transparent wrappers are skipped. Throws if no meaningful parent is found before the fiber root.
+
+```ts
+const successText = await app.find({ testID: 'form-success-text' });
+const banner = await successText.parent();
+// banner is the View with testID="form-success"
+const props = await banner.props();
+expect(props.testID).toBe('form-success');
+```
+
+### `element.siblings()`
+
+Returns all fiber siblings — nodes that share the same parent — excluding the element itself. Order follows fiber sibling link order (same as React render order).
+
+```ts
+const firstSummary = await app.find({ testID: 'summary-plan' });
+const others = await firstSummary.siblings();
+// others = [summary-theme element, summary-notifications element]
+expect(others.length).toBe(2);
+expect(await others[0].text()).toBe('Theme: system');
+```
+
+### `element.nextSibling()` / `element.prevSibling()`
+
+Returns the immediately following or preceding sibling in fiber order. Returns `null` if the element is already last (or first).
+
+```ts
+const planLabel = await app.find({ testID: 'summary-plan' });
+const themeLabel = await planLabel.nextSibling();
+expect(await themeLabel!.text()).toBe('Theme: system');
+
+const notifLabel = await app.find({ testID: 'summary-notifications' });
+const prev = await notifLabel.prevSibling();
+expect(await prev!.text()).toBe('Theme: system');
+```
+
+### `element.closest(selector)`
+
+Walks up the ancestor chain via `fiber.return` and returns the first ancestor that matches `selector`. Supports the same `Selector` union as `app.find` — testID, component name, text, accessibilityLabel, accessibilityRole, and placeholder — including `RegExp` text matching. Throws if no match is found before the fiber root.
+
+```ts
+// Climb from a child text element to its named container
+const planText = await app.find({ testID: 'summary-plan' });
+const summaryBox = await planText.closest({ testID: 'form-summary' });
+const props = await summaryBox.props();
+expect(props.testID).toBe('form-summary');
+
+// Navigate to the nearest ScrollView ancestor
+const input = await app.find({ testID: 'input-name' });
+const scroller = await input.closest({ component: 'ScrollView' });
+await scroller.scrollTo(0);
+```
+
+`closest` is the tree-traversal equivalent of the CSS `Element.closest()` method and is the most useful of the traversal APIs for tests where containers lack `testID`s.
+
+---
+
 ## Device-level actions
 
 ### `app.pressBack()`
@@ -395,6 +460,76 @@ await app.setPermission('notifications', 'reset');
 ```
 
 Common iOS service names: `camera`, `microphone`, `photos`, `location`, `contacts`, `calendars`, `reminders`, `motion`.
+
+---
+
+### `app.setOrientation(orientation)`
+
+Rotates the device to `'portrait'` or `'landscape'`. On iOS the framework queries the app's current `Dimensions` via the bridge and sends one AppleScript keyboard shortcut to the Simulator (Cmd+← / Cmd+→); on Android it uses `adb shell settings put system user_rotation`. An implicit 400 ms delay is added on iOS after the rotation to allow the layout system to propagate the change before subsequent queries.
+
+```ts
+it('shows the landscape layout', async (app) => {
+  await app.setOrientation('landscape');
+  await app.waitForElement('landscape-toolbar');
+
+  await app.setOrientation('portrait');
+  await app.waitForElementToDisappear('landscape-toolbar');
+});
+```
+
+**iOS requirement**: the Simulator must be running and the test runner process must have permission to control System Events (grant in System Settings › Privacy & Security › Accessibility if you see a permission prompt).
+
+**Android**: the call is an absolute set (not a toggle), so orientation is deterministic regardless of the device's prior state.
+
+---
+
+### `app.setBiometricEnrollment(enrolled)` / `app.matchBiometric()` / `app.rejectBiometric()`
+
+iOS only. Controls the biometric sensor simulation on the iOS Simulator via `xcrun simctl biometricEnrollment` and `xcrun simctl biometric`. Requires Xcode 12+. Calling any of these methods on Android throws an error.
+
+```ts
+beforeAll(async (app) => {
+  await app.setBiometricEnrollment(true);   // enroll Face ID / Touch ID
+});
+
+it('signs in with Face ID', async (app) => {
+  await (await app.find({ testID: 'btn-faceid' })).tap();
+
+  // Simulate the OS presenting the biometric prompt and the user passing
+  await app.matchBiometric();
+  await app.waitForElement('home-screen');
+});
+
+it('shows an error on failed biometric', async (app) => {
+  await (await app.find({ testID: 'btn-faceid' })).tap();
+  await app.rejectBiometric();
+  await app.waitForElement('biometric-error-banner');
+});
+```
+
+---
+
+### `app.isAppRunning()`
+
+Returns `true` if the app process is still alive. Uses `pgrep -f <bundleId>` on iOS and `adb shell pidof` on Android.
+
+The most common use is diagnosing a crash after a "CDP connection lost" error:
+
+```ts
+it('handles a crash gracefully', async (app) => {
+  try {
+    await (await app.find({ testID: 'btn-crash-trigger' })).tap();
+  } catch (err) {
+    // err.message will say "CDP connection lost — the app may have crashed"
+    if (!(await app.isAppRunning())) {
+      console.log('App crashed — check crash logs in ~/Library/Logs/DiagnosticReports');
+    }
+    throw err;
+  }
+});
+```
+
+The runner does not call `isAppRunning()` automatically; the improved error message ("CDP connection lost — the app may have crashed") is your first signal, and `isAppRunning()` lets you confirm it programmatically.
 
 ---
 

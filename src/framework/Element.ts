@@ -16,6 +16,36 @@ function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }
 
+// Encode a Selector into positional arguments for bridge traversal functions
+// (getParent, getSiblings, closest, etc.) that accept (nodeId, type, value, exact, regexFlags?).
+function selectorToBridgeArgs(nodeId: number, sel: Selector): string {
+  if ('testID' in sel) {
+    return `${nodeId}, 'testID', ${JSON.stringify(sel.testID)}, true`;
+  }
+  if ('component' in sel) {
+    return `${nodeId}, 'component', ${JSON.stringify(sel.component)}, true`;
+  }
+  if ('text' in sel) {
+    if (sel.text instanceof RegExp) {
+      return `${nodeId}, 'text', ${JSON.stringify(sel.text.source)}, true, ${JSON.stringify(sel.text.flags)}`;
+    }
+    const exact = (sel as { exact?: boolean }).exact !== false;
+    return `${nodeId}, 'text', ${JSON.stringify(sel.text)}, ${exact}`;
+  }
+  if ('accessibilityLabel' in sel) {
+    const exact = (sel as { exact?: boolean }).exact !== false;
+    return `${nodeId}, 'accessibilityLabel', ${JSON.stringify(sel.accessibilityLabel)}, ${exact}`;
+  }
+  if ('accessibilityRole' in sel) {
+    return `${nodeId}, 'accessibilityRole', ${JSON.stringify(sel.accessibilityRole)}, true`;
+  }
+  if ('placeholder' in sel) {
+    const exact = (sel as { exact?: boolean }).exact !== false;
+    return `${nodeId}, 'placeholder', ${JSON.stringify(sel.placeholder)}, ${exact}`;
+  }
+  throw new Error(`Unsupported selector for tree traversal: ${JSON.stringify(sel)}`);
+}
+
 export interface NodeDescriptor {
   nodeId: number;
   componentType: string;
@@ -413,6 +443,74 @@ export class Element {
       timestampMs: start,
     });
     return descriptors.map(d => new Element(d, this.session, this.verbose, this.slowDelay, this.tracer));
+  }
+
+  // ── Tree traversal ────────────────────────────────────────────────────────
+
+  async parent(): Promise<Element> {
+    const start = Date.now();
+    const descriptor = await this.session.evaluate<NodeDescriptor | null>(
+      `__testBridge__.getParent(${this.descriptor.nodeId})`,
+    );
+    if (!descriptor) {
+      throw new Error(`parent() — no meaningful parent found for node ${this.descriptor.nodeId}`);
+    }
+    this.log(`parent: ${this.label}`);
+    this.tracer?.add({ action: 'parent', target: this.label, durationMs: Date.now() - start, timestampMs: start });
+    return new Element(descriptor, this.session, this.verbose, this.slowDelay, this.tracer);
+  }
+
+  async siblings(): Promise<Element[]> {
+    const start = Date.now();
+    const descriptors = await this.session.evaluate<NodeDescriptor[]>(
+      `__testBridge__.getSiblings(${this.descriptor.nodeId})`,
+    );
+    this.log(`siblings: ${descriptors.length} found for ${this.label}`);
+    this.tracer?.add({ action: 'siblings', target: this.label, value: `${descriptors.length} found`, durationMs: Date.now() - start, timestampMs: start });
+    return descriptors.map(d => new Element(d, this.session, this.verbose, this.slowDelay, this.tracer));
+  }
+
+  async nextSibling(): Promise<Element | null> {
+    const start = Date.now();
+    const descriptor = await this.session.evaluate<NodeDescriptor | null>(
+      `__testBridge__.getNextSibling(${this.descriptor.nodeId})`,
+    );
+    if (!descriptor) return null;
+    this.log(`nextSibling: ${this.label}`);
+    this.tracer?.add({ action: 'nextSibling', target: this.label, durationMs: Date.now() - start, timestampMs: start });
+    return new Element(descriptor, this.session, this.verbose, this.slowDelay, this.tracer);
+  }
+
+  async prevSibling(): Promise<Element | null> {
+    const start = Date.now();
+    const descriptor = await this.session.evaluate<NodeDescriptor | null>(
+      `__testBridge__.getPreviousSibling(${this.descriptor.nodeId})`,
+    );
+    if (!descriptor) return null;
+    this.log(`prevSibling: ${this.label}`);
+    this.tracer?.add({ action: 'prevSibling', target: this.label, durationMs: Date.now() - start, timestampMs: start });
+    return new Element(descriptor, this.session, this.verbose, this.slowDelay, this.tracer);
+  }
+
+  async closest(selector: Selector): Promise<Element> {
+    const start = Date.now();
+    const args = selectorToBridgeArgs(this.descriptor.nodeId, selector);
+    const descriptor = await this.session.evaluate<NodeDescriptor | null>(
+      `__testBridge__.closest(${args})`,
+    );
+    if (!descriptor) {
+      throw new Error(
+        `closest(${JSON.stringify(selector)}) — no matching ancestor found for node ${this.descriptor.nodeId}`,
+      );
+    }
+    this.log(`closest: ${selectorLabel(selector)} from ${this.label}`);
+    this.tracer?.add({
+      action: 'closest',
+      target: `${selectorLabel(selector)} from ${this.label}`,
+      durationMs: Date.now() - start,
+      timestampMs: start,
+    });
+    return new Element(descriptor, this.session, this.verbose, this.slowDelay, this.tracer);
   }
 
   async props(): Promise<Record<string, unknown>> {
