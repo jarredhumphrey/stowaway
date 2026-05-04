@@ -44,6 +44,8 @@ All configuration comes from environment variables, read once at startup via `lo
 | `TEST_RESULTS_DIR` | `test-results` | Where JSON/XML results and screenshots land |
 | `SUITE_NAME` | — | Optional label printed in the run header |
 | `VERBOSE` | — | `1` or `true` — prints each test step as it completes; also enabled by `--verbose` CLI flag |
+| `SLOW_REPLAY` | — | `1` or `true` — adds a delay between trace steps when generating the failure replay video |
+| `SLOW_REPLAY_DELAY` | `800` | Delay in ms between steps when `SLOW_REPLAY` is enabled |
 
 A typical `package.json` script:
 

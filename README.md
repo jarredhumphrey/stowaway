@@ -66,6 +66,8 @@ All configuration is read from environment variables:
 | `TEST_RESULTS_DIR` | `test-results` | JSON results output directory |
 | `SUITE_NAME` | — | Label printed in the run header |
 | `VERBOSE` | — | `1` or `true` — prints each step as it runs; also enabled by `--verbose` CLI flag |
+| `SLOW_REPLAY` | — | `1` or `true` — adds a delay between steps in failure replay videos |
+| `SLOW_REPLAY_DELAY` | `800` | Delay in ms between steps when `SLOW_REPLAY` is enabled |
 
 ```ts
 import { loadConfig } from 'stowaway';
@@ -128,7 +130,8 @@ runner.run([
 | `waitForElementToDisappear(selector \| testID, opts?)` | Polls until the element leaves the tree |
 | `waitFor(fn, opts?)` | Polls an arbitrary `() => Promise<boolean>` |
 | `scrollAndFind(testID, opts?)` | Scrolls a FlatList/ScrollView in steps until the element appears |
-| `getTree(maxDepth?)` | Returns the serialized fiber tree — useful for debugging testIDs |
+| `getTree(maxDepth?)` | Returns the serialized fiber tree |
+| `printTree(maxDepth?)` | Prints the fiber tree to stdout — preferred for debugging missing testIDs |
 
 **Selector types:**
 ```ts
@@ -141,27 +144,68 @@ runner.run([
 { placeholder: string; exact?: boolean }
 ```
 
-### `AppSession` interactions & device
+### `AppSession` interactions
 
 | Method | Description |
 |--------|-------------|
 | `screenshot(name)` | Saves `<testResultsDir>/<name>-<timestamp>.png` |
 | `dismissKeyboard()` | Blurs the first TextInput in the tree |
-| `disableAnimations()` | Patches `Animated` to zero duration — call in `beforeAll` to reduce timing flakiness |
-| `pressBack()` | Android only — sends hardware Back key |
-| `openURL(url)` | Opens a URL via the OS deep-link mechanism |
-| `setLocation(lat, lng)` | Simulates GPS location (iOS only) |
-| `setPermission(service, status)` | Grants/revokes/resets a system permission |
+| `disableAnimations()` | Patches `Animated` to zero duration — call in `beforeAll` to reduce flakiness |
+| `step(name, fn)` | Runs `fn` as a named step; prefixes the error message with `[name]` on failure |
+
+**Network:**
+
+| Method | Description |
+|--------|-------------|
 | `setNetworkOffline(offline)` | When `true`, all `fetch` calls reject with a network error |
 | `mockNetwork(matcher, response)` | Intercepts matching `fetch` calls and returns a controlled response |
 | `networkRequests()` | Returns all intercepted requests since the last app launch |
 | `clearNetworkMocks()` | Wipes all mocks and the request log |
+| `waitForRequest(matcher, opts?)` | Polls until a matching request appears in the log |
+| `waitForResponse(matcher, opts?)` | Same but waits until the response has settled |
+
+**Storage:**
+
+| Method | Description |
+|--------|-------------|
 | `setStorage(key, value)` | Writes a string to AsyncStorage |
 | `getStorage(key)` | Reads a string from AsyncStorage (`null` if absent) |
 | `removeStorage(key)` | Deletes a key from AsyncStorage |
 | `clearStorage()` | Clears all AsyncStorage keys |
 
+**Fake timers:**
+
+| Method | Description |
+|--------|-------------|
+| `clock.install(baseTime?)` | Patches `setTimeout`/`setInterval`/`Date.now` in Hermes to use fake time |
+| `clock.tick(ms)` | Advances fake time, firing all queued callbacks in order |
+| `clock.restore()` | Restores real timers (called automatically on `reset()`) |
+| `clock.now()` | Returns current fake timestamp |
+
+**Device state:**
+
+| Method | Description |
+|--------|-------------|
+| `pressBack()` | Android only — sends hardware Back key |
+| `openURL(url)` | Opens a URL via the OS deep-link mechanism |
+| `setLocation(lat, lng)` | Simulates GPS location (iOS only) |
+| `setPermission(service, status)` | Grants/revokes/resets a system permission |
+| `setOrientation(orientation)` | `'portrait'` or `'landscape'` — iOS via AppleScript, Android via adb |
+| `startRecording(name?)` | Starts video recording; saves to `<testResultsDir>/<name>-<timestamp>.mp4` |
+| `stopRecording()` | Stops recording and returns the file path |
+| `pushNotification(payload)` | iOS only — delivers a push via `xcrun simctl push`; payload follows APNS format |
+| `setStatusBar(opts)` | iOS only — overrides status bar fields (time, battery, wifi, etc.) |
+| `resetStatusBar()` | iOS only — clears all status bar overrides |
+| `setClipboard(text)` | iOS only — writes to the host clipboard (synced with simulator) |
+| `getClipboard()` | iOS only — reads from the host clipboard |
+| `setBiometricEnrollment(enrolled)` | iOS only — enrolls or un-enrolls the biometric sensor |
+| `matchBiometric()` | iOS only — simulates a successful biometric match |
+| `rejectBiometric()` | iOS only — simulates a failed biometric attempt |
+| `isAppRunning()` | Returns `true` if the app process is alive — useful after a CDP connection loss |
+
 ### `Element`
+
+**Interactions:**
 
 | Method | Description |
 |--------|-------------|
@@ -175,10 +219,17 @@ runner.run([
 | `submitEditing()` | Calls `onSubmitEditing` |
 | `check()` / `uncheck()` | Calls `onValueChange(true/false)` — for Switch and custom toggles |
 | `selectOption(value)` | Calls `onValueChange(value)` — for pickers and segmented controls |
+| `setDate(date)` | Fires `onDateChange`, `onChange`, or `onConfirm` — for date pickers |
+| `slideToValue(value)` | Fires `onValueChange` then `onSlidingComplete` — for sliders |
 | `swipe(direction, distance?)` | Fires a PanResponder gesture sequence |
 | `dragTo(target)` | Measures both elements and fires a PanResponder drag |
 | `scrollTo(offset)` | Scrolls the element vertically to the given px offset |
 | `scrollToX(offset)` | Scrolls the element horizontally to the given px offset |
+
+**Reading state:**
+
+| Method | Description |
+|--------|-------------|
 | `text()` | Concatenated HostText descendants |
 | `inputValue()` | `memoizedProps.value ?? defaultValue ?? ''` — for TextInput |
 | `prop(name)` | Single named prop from `memoizedProps` |
@@ -189,8 +240,19 @@ runner.run([
 | `isVisible()` | Alias for `exists()` |
 | `isFocused()` | `true` if `accessibilityState.focused` |
 | `getFrame()` | `{ x, y, width, height }` via `stateNode.measure()` |
+
+**Tree traversal:**
+
+| Method | Description |
+|--------|-------------|
 | `find(selector)` | Scoped query within this element's subtree |
 | `findAll(selector)` | Scoped query — all matches within this element's subtree |
+| `parent()` | Nearest meaningful ancestor; skips HOC wrappers and Fragments |
+| `siblings()` | All fiber siblings excluding this element |
+| `sibling(selector)` | First sibling matching `selector` — throws if none found |
+| `nextSibling()` | Immediately following sibling in fiber order, or `null` |
+| `prevSibling()` | Immediately preceding sibling in fiber order, or `null` |
+| `closest(selector)` | Walks up `fiber.return` and returns the first ancestor matching `selector` |
 
 ### `expect`
 
@@ -219,6 +281,13 @@ await expect(element).toBeVisible()
 await expect(element).toBeEnabled()
 await expect(element).not.toHaveText('Error')
 await expect(element).toHaveText('Done', { timeout: 8_000 })
+```
+
+`expect.soft(value)` works like `expect(value)` but queues failures instead of throwing immediately. All queued failures are reported together at the end of the test:
+
+```ts
+expect.soft(await label.text()).toBe('Done');  // continues even if this fails
+await expect.soft(element).toBeVisible();
 ```
 
 ---
