@@ -79,6 +79,7 @@ export class AppSession {
   private _currentRecordingPath: string | null = null;
   private _slowModeDelay = 0;
   private _tracer: TraceCollector | null = null;
+  private _commitWatchers = new Set<() => void>();
 
   constructor(private config: E2EConfig) {
     this.device = new Device(config);
@@ -111,6 +112,7 @@ export class AppSession {
   }
 
   async reset(): Promise<void> {
+    this._commitWatchers.clear();
     await this.hermes.disconnect();
     await this.device.terminate();
     await this.device.launch();
@@ -127,19 +129,26 @@ export class AppSession {
     const deadline = Date.now() + 60_000;
 
     while (Date.now() < deadline) {
-      let targets: Array<{ title?: string; webSocketDebuggerUrl: string }> = [];
+      let targets: Array<{ id?: string; title?: string; webSocketDebuggerUrl: string }> = [];
       try {
         const res = await fetch(`http://localhost:${this.config.metroPort}/json`);
         if (res.ok) {
-          const pages = (await res.json()) as Array<{ title?: string; webSocketDebuggerUrl?: string }>;
+          const pages = (await res.json()) as Array<{ id?: string; title?: string; webSocketDebuggerUrl?: string }>;
           const all = pages.filter(
-            (p): p is { title?: string; webSocketDebuggerUrl: string } => Boolean(p.webSocketDebuggerUrl),
+            (p): p is { id?: string; title?: string; webSocketDebuggerUrl: string } => Boolean(p.webSocketDebuggerUrl),
           );
           const bundleId = this.config.bundleId.toLowerCase();
           const isShell = (t: { title?: string }) =>
             EXPO_SHELL_IDS.some(id => t.title?.toLowerCase().includes(id));
+          const pageNum = (t: { id?: string }) => {
+            const m = t.id?.match(/-(\d+)$/);
+            return m ? parseInt(m[1], 10) : 0;
+          };
+          const bundleMatches = all
+            .filter(t => t.title?.toLowerCase().includes(bundleId))
+            .sort((a, b) => pageNum(b) - pageNum(a));
           targets = [
-            ...all.filter(t => t.title?.toLowerCase().includes(bundleId)),
+            ...bundleMatches,
             ...all.filter(t => !t.title?.toLowerCase().includes(bundleId) && !isShell(t)),
             ...all.filter(isShell),
           ];
@@ -152,6 +161,14 @@ export class AppSession {
         try {
           await this.hermes.disconnect();
           await this.hermes.connect(target.webSocketDebuggerUrl);
+          try {
+            await this.hermes.addBinding('stowawayNotify', () => {
+              for (const fn of this._commitWatchers) fn();
+            });
+          } catch (e) {
+            // Runtime.addBinding not supported — waitForElement falls back to polling.
+            console.warn(`  [stowaway] commit-based waitForElement disabled: ${e instanceof Error ? e.message : String(e)}`);
+          }
 
           const perTargetDeadline = Date.now() + 5_000;
           let ok = false;
@@ -343,21 +360,61 @@ export class AppSession {
       : selectorOrTestID;
     const timeout = opts?.timeout ?? this.config.defaultTimeout;
     const interval = opts?.interval ?? this.config.pollInterval;
-    const deadline = Date.now() + timeout;
     const expr = selectorToExpression(selector);
 
-    while (Date.now() < deadline) {
-      const descriptor = await this.hermes.evaluate<NodeDescriptor | null>(expr);
-      if (descriptor) {
+    const isActive = async (descriptor: NodeDescriptor) =>
+      this.hermes.evaluate<boolean>(`__testBridge__.isElementActive(${descriptor.nodeId})`);
+
+    // Immediate check — avoids Promise overhead when element is already present.
+    const immediate = await this.hermes.evaluate<NodeDescriptor | null>(expr);
+    if (immediate && await isActive(immediate)) {
+      this.log(`waitFor: ${selectorStep(selector)}`);
+      this._tracer?.add({ action: 'waitForElement', target: selectorStep(selector), durationMs: Date.now() - start, timestampMs: start });
+      return new Element(immediate, this.hermes, this.config.verbose, this._slowModeDelay, this._tracer);
+    }
+
+    // Wait for React commits (instant) with polling as a fallback.
+    return new Promise<Element>((resolve, reject) => {
+      let done = false;
+
+      const finish = (descriptor: NodeDescriptor) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        this._commitWatchers.delete(onCommit);
         this.log(`waitFor: ${selectorStep(selector)}`);
         this._tracer?.add({ action: 'waitForElement', target: selectorStep(selector), durationMs: Date.now() - start, timestampMs: start });
-        return new Element(descriptor, this.hermes, this.config.verbose, this._slowModeDelay, this._tracer);
-      }
-      await sleep(interval);
-    }
-    throw new Error(
-      `waitForElement(${JSON.stringify(selectorOrTestID)}) timed out after ${timeout}ms`,
-    );
+        resolve(new Element(descriptor, this.hermes, this.config.verbose, this._slowModeDelay, this._tracer));
+      };
+
+      const timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        this._commitWatchers.delete(onCommit);
+        reject(new Error(`waitForElement(${JSON.stringify(selectorOrTestID)}) timed out after ${timeout}ms`));
+      }, timeout - (Date.now() - start));
+
+      const onCommit = async () => {
+        if (done) return;
+        try {
+          const descriptor = await this.hermes.evaluate<NodeDescriptor | null>(expr);
+          if (descriptor && await isActive(descriptor)) finish(descriptor);
+        } catch { /* session disconnected — timeout will reject */ }
+      };
+
+      this._commitWatchers.add(onCommit);
+
+      // Polling fallback in case the commit hook didn't fire.
+      const poll = async () => {
+        if (done) return;
+        try {
+          const descriptor = await this.hermes.evaluate<NodeDescriptor | null>(expr);
+          if (descriptor && await isActive(descriptor)) { finish(descriptor); return; }
+        } catch { /* session disconnected */ }
+        if (!done) setTimeout(poll, interval);
+      };
+      setTimeout(poll, interval);
+    });
   }
 
   async findNth(selector: Selector, n: number): Promise<Element> {
@@ -378,6 +435,19 @@ export class AppSession {
   async printTree(maxDepth = 30): Promise<void> {
     type TreeNode = { type: string | null; testID: string | null; children: TreeNode[] };
     const roots = await this.getTree(maxDepth) as TreeNode[];
+    function print(nodes: TreeNode[], depth: number): void {
+      for (const node of nodes) {
+        const label = [node.type ?? '(null)', node.testID ? `[${node.testID}]` : ''].join(' ').trimEnd();
+        console.log('  '.repeat(depth) + label);
+        print(node.children, depth + 1);
+      }
+    }
+    print(roots, 0);
+  }
+
+  async printVisibleTree(maxDepth = 30): Promise<void> {
+    type TreeNode = { type: string | null; testID: string | null; children: TreeNode[] };
+    const roots = await this.hermes.evaluate<TreeNode[]>(`__testBridge__.getTree(${maxDepth}, true)`);
     function print(nodes: TreeNode[], depth: number): void {
       for (const node of nodes) {
         const label = [node.type ?? '(null)', node.testID ? `[${node.testID}]` : ''].join(' ').trimEnd();
@@ -516,6 +586,13 @@ export class AppSession {
     throw new Error(
       `waitForElementToDisappear(${JSON.stringify(selectorOrTestID)}) timed out after ${timeout}ms`,
     );
+  }
+
+  async waitForInteractions(opts?: { delay?: number }): Promise<void> {
+    const start = Date.now();
+    const delay = opts?.delay ?? 500;
+    await new Promise<void>(r => setTimeout(r, delay));
+    this._tracer?.add({ action: 'waitForInteractions', durationMs: Date.now() - start, timestampMs: start });
   }
 
   async dismissKeyboard(): Promise<void> {

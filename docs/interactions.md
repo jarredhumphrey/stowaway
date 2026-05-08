@@ -239,6 +239,20 @@ describe('Checkout', () => {
 
 Re-apply after each `reset()` if needed, since the patch is scoped to a single app launch.
 
+### `app.waitForInteractions(opts?)`
+
+Sleeps for a configurable delay (default 500 ms) on the test runner side. Use after `waitForElement` resolves to give React Navigation's slide transitions or other native-driven animations time to finish before interacting.
+
+```ts
+const input = await app.waitForElement('email-input');
+await app.waitForInteractions();
+await input.typeText('user@example.com');
+```
+
+Why a fixed delay? React Navigation's stack/tab transitions run on the native thread and don't trigger any further React commits when they complete, so there's no fiber-level signal to wait on. A 500 ms delay covers the default 300–400 ms transition with buffer; override via `{ delay: 800 }` for slower animations.
+
+If you've called `disableAnimations()`, this is unnecessary — transitions complete instantly.
+
 ---
 
 ## Timer control

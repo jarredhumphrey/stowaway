@@ -79,6 +79,17 @@ const input = await app.find({ placeholder: 'email', exact: false });
 
 ---
 
+## Visibility filtering
+
+`find`, `findAll`, `findNth`, and `waitForElement` all filter out fibers that aren't currently visible. A fiber is considered not visible if any ancestor in its chain has:
+
+- `activityState < 2` — a `react-native-screens` `Screen` that's prerendered but not currently navigated to
+- `style.display === 'none'` — explicitly hidden via static style
+
+This prevents two common failure modes: matching elements on a prerendered background screen, and matching multiple instances when only one is actually visible (e.g. tab navigators that keep all tabs mounted).
+
+Note that this only catches React-driven visibility. Native-driven animations (e.g. React Navigation slide transitions) don't change any fiber prop while running, so visibility passes the moment the navigation commits, even if the animation is still playing. Use [`app.waitForInteractions()`](./interactions.md#appwaitforinteractionsopts) afterward if you need to wait for the animation to finish.
+
 ## `find(selector)`
 
 Returns the first matching `Element`. Throws immediately if nothing matches — use `waitForElement` if the element might not be in the tree yet.
@@ -109,7 +120,9 @@ await secondItem.tap();
 
 ## `waitForElement(selector | testID, opts?)`
 
-Polls until the element appears or `timeout` ms elapses. Accepts any `Selector` or a plain string (treated as `{ testID }`). Throws with a descriptive error on timeout.
+Resolves as soon as the element appears in a visible part of the tree, or rejects after `timeout` ms. Accepts any `Selector` or a plain string (treated as `{ testID }`). Throws with a descriptive error on timeout.
+
+Internally this hooks React's commit phase via `__REACT_DEVTOOLS_GLOBAL_HOOK__.onCommitFiberRoot`, so it resolves on the first React render that contains the element — usually within a few milliseconds, not at the next poll boundary. A polling fallback at `interval` (default 250 ms) runs in parallel as a safety net.
 
 ```ts
 // Plain string — shorthand for { testID: 'success-banner' }
@@ -265,3 +278,11 @@ The optional depth argument (default 30) limits how deep the traversal goes. `ge
 const tree = await app.getTree();
 console.log(JSON.stringify(tree, null, 2));
 ```
+
+For a less noisy view that excludes prerendered background screens and `display: none` subtrees, use `app.printVisibleTree()`:
+
+```ts
+await app.printVisibleTree();
+```
+
+This applies the same visibility filter as [`find`](#findselector) — useful when `printTree` is overwhelming because of pre-rendered tabs or stack screens kept mounted in the background.

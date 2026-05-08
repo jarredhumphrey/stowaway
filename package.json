@@ -1,6 +1,6 @@
 {
   "name": "stowaway",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "E2E testing framework for React Native apps using the Hermes CDP bridge",
   "keywords": [
     "react-native",

@@ -76,14 +76,15 @@ Key methods on `AppSession`:
 
 | Method | Behaviour |
 |--------|-----------|
-| `find(selector)` | First match; throws if none |
-| `findAll(selector)` | All matches; empty array if none |
+| `find(selector)` | First visible match; throws if none. Filters out fibers under `activityState < 2` (inactive react-native-screens) or `style.display === 'none'`. |
+| `findAll(selector)` | All visible matches; empty array if none. Same visibility filter as `find`. |
 | `findNth(selector, n)` | Returns the nth (0-based) match from `findAll`; throws if out of range |
-| `waitForElement(selector \| testID, opts?)` | Polls `find(selector)` until `timeout` ms; string argument treated as `{ testID }` |
+| `waitForElement(selector \| testID, opts?)` | Resolves on the first React commit containing a visible match (uses `Runtime.addBinding` + `onCommitFiberRoot`); polling fallback at `interval`. String argument treated as `{ testID }`. |
 | `waitForElementToDisappear(selector \| testID, opts?)` | Polls until the element leaves the committed tree; string treated as `{ testID }` |
 | `waitFor(fn, opts?)` | Polls an arbitrary `() => Promise<boolean>` until `timeout` ms |
 | `getTree(maxDepth?)` | Returns the serialized fiber tree (default depth 30) — raw data |
 | `printTree(maxDepth?)` | Prints the fiber tree to stdout, one line per node (`ComponentName [testID]`), indented by depth — preferred for debugging missing testIDs |
+| `printVisibleTree(maxDepth?)` | Like `printTree` but prunes inactive screen subtrees and `display:none` nodes from the output |
 | `scrollAndFind(testID, opts?)` | Scrolls a visible FlatList/ScrollView in 5 000-px steps, polling after each until `testID` appears |
 | `screenshot(name)` | Saves `<testResultsDir>/<name>-<timestamp>.png` |
 | `dismissKeyboard()` | Blurs the first TextInput found in the tree |
@@ -92,6 +93,7 @@ Key methods on `AppSession`:
 | `setLocation(lat, lng)` | iOS: `xcrun simctl location set`; Android: not implemented |
 | `setPermission(service, status)` | iOS: `xcrun simctl privacy`; Android: `pm grant/revoke` |
 | `disableAnimations()` | Patches `Animated.timing/spring/decay` to `duration: 0`; no-ops `LayoutAnimation`. Call in `beforeAll` to reduce timing flakiness. Re-apply after each `reset()` if needed. |
+| `waitForInteractions(opts?)` | Sleeps `delay` ms (default 500) on the test runner side. Use after `waitForElement` to let native-driven nav animations finish. No bridge eval — pure Node-side delay. |
 | `setStorage(key, value)` | Writes a string to AsyncStorage. Throws if `@react-native-async-storage/async-storage` is not bundled. |
 | `getStorage(key)` | Reads a string from AsyncStorage; returns `null` if absent. |
 | `removeStorage(key)` | Deletes a key from AsyncStorage. |
@@ -245,7 +247,8 @@ The IIFE installs `globalThis.__testBridge__` with these methods. Extend `inject
 | `setChecked(nodeId, checked)` | `boolean` — calls `onValueChange(checked)` on nearest ancestor |
 | `selectOption(nodeId, value)` | `boolean` — calls `onValueChange(value)` on nearest ancestor |
 | `dismissKeyboard()` | `boolean` |
-| `getTree(maxDepth?)` | serialized tree — useful for debugging testIDs |
+| `getTree(maxDepth?, activeOnly?)` | serialized tree — useful for debugging testIDs. Pass `activeOnly=true` to prune inactive screen subtrees and `display:none` nodes |
+| `isElementActive(nodeId)` | `boolean` — walks `fiber.return` checking `activityState >= 2` and not `display:none`. Used internally by `find`/`findAll`/`waitForElement` to filter visibility |
 | `getParent(nodeId)` | `NodeDescriptor \| null` — nearest meaningful ancestor (skips HOC wrappers, Context, Fragments) |
 | `getSiblings(nodeId)` | `NodeDescriptor[]` — all fiber siblings excluding the node itself |
 | `getNextSibling(nodeId)` | `NodeDescriptor \| null` — immediately following sibling in fiber order |

@@ -18,6 +18,7 @@ export class HermesSession {
   private ws: WebSocket | null = null;
   private nextId = 1;
   private pendingCalls = new Map<number, { resolve: (r: unknown) => void; reject: (e: Error) => void }>();
+  private bindingListeners = new Map<string, Set<(payload: string) => void>>();
   private executionContextId: number | undefined;
   private _disconnecting = false;
 
@@ -37,8 +38,21 @@ export class HermesSession {
       this.ws = null;
       this.executionContextId = undefined;
       this.pendingCalls.clear();
+      this.bindingListeners.clear();
     }
     this._disconnecting = false;
+  }
+
+  async addBinding(name: string, handler: (payload: string) => void): Promise<void> {
+    if (!this.bindingListeners.has(name)) {
+      await this.send('Runtime.addBinding', { name });
+      this.bindingListeners.set(name, new Set());
+    }
+    this.bindingListeners.get(name)!.add(handler);
+  }
+
+  removeBindingListener(name: string, handler: (payload: string) => void): void {
+    this.bindingListeners.get(name)?.delete(handler);
   }
 
   async evaluate<T>(expression: string): Promise<T> {
@@ -107,6 +121,12 @@ export class HermesSession {
         if (!msg.id && msg.method === 'Runtime.executionContextCreated') {
           const ctx = (msg.params as any)?.context;
           if (ctx?.id !== undefined) this.executionContextId = ctx.id;
+          return;
+        }
+
+        if (!msg.id && msg.method === 'Runtime.bindingCalled') {
+          const { name, payload } = msg.params as { name: string; payload: string };
+          for (const fn of this.bindingListeners.get(name) ?? []) fn(payload);
           return;
         }
 

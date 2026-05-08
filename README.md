@@ -135,15 +135,16 @@ runner.run([
 
 | Method | Description |
 |--------|-------------|
-| `find(selector)` | First match — throws immediately if not found |
-| `findAll(selector)` | All matches — empty array if none |
-| `findNth(selector, n)` | nth match (0-based) from `findAll` — throws if out of range |
-| `waitForElement(selector \| testID, opts?)` | Polls until the element appears; string arg treated as `{ testID }` |
+| `find(selector)` | First visible match — throws immediately if not found |
+| `findAll(selector)` | All visible matches — empty array if none |
+| `findNth(selector, n)` | nth visible match (0-based) from `findAll` — throws if out of range |
+| `waitForElement(selector \| testID, opts?)` | Resolves on the first React commit containing the element; string arg treated as `{ testID }` |
 | `waitForElementToDisappear(selector \| testID, opts?)` | Polls until the element leaves the tree |
 | `waitFor(fn, opts?)` | Polls an arbitrary `() => Promise<boolean>` |
 | `scrollAndFind(testID, opts?)` | Scrolls a FlatList/ScrollView in steps until the element appears |
 | `getTree(maxDepth?)` | Returns the serialized fiber tree |
 | `printTree(maxDepth?)` | Prints the fiber tree to stdout — preferred for debugging missing testIDs |
+| `printVisibleTree(maxDepth?)` | Like `printTree` but excludes prerendered/`display:none` subtrees |
 
 **Selector types:**
 ```ts
@@ -163,6 +164,7 @@ runner.run([
 | `screenshot(name)` | Saves `<testResultsDir>/<name>-<timestamp>.png` |
 | `dismissKeyboard()` | Blurs the first TextInput in the tree |
 | `disableAnimations()` | Patches `Animated` to zero duration — call in `beforeAll` to reduce flakiness |
+| `waitForInteractions(opts?)` | Sleeps `delay` ms (default 500) — use after `waitForElement` to let native nav animations finish |
 | `step(name, fn)` | Runs `fn` as a named step; prefixes the error message with `[name]` on failure |
 
 **Network:**

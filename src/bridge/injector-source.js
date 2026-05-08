@@ -27,10 +27,14 @@
 
   // Walk the fiber tree via child/sibling links (never return, to avoid cycles).
   function walk(fiber, visitor) {
-    if (!fiber) return;
-    visitor(fiber);
-    walk(fiber.child, visitor);
-    walk(fiber.sibling, visitor);
+    var stack = [fiber];
+    while (stack.length > 0) {
+      var current = stack.pop();
+      if (!current) continue;
+      visitor(current);
+      if (current.sibling) stack.push(current.sibling);
+      if (current.child) stack.push(current.child);
+    }
   }
 
   // Collect all HostText (tag-6) descendant strings from a fiber.
@@ -72,13 +76,27 @@
       : (fiber.type && (fiber.type.displayName || fiber.type.name)) || 'Unknown';
   }
 
+  function checkFiberActive(fiber) {
+    var current = fiber;
+    while (current) {
+      var p = current.memoizedProps;
+      if (p) {
+        if (p.activityState != null && p.activityState < 2) return false;
+        var style = p.style;
+        if (style && !Array.isArray(style) && style.display === 'none') return false;
+      }
+      current = current.return;
+    }
+    return true;
+  }
+
   function findByTestID(testID) {
     var found = null;
     var roots = getRoots();
     for (var i = 0; i < roots.length; i++) {
       walk(roots[i], function (fiber) {
         if (found) return;
-        if (fiber.memoizedProps && fiber.memoizedProps.testID === testID) {
+        if (fiber.memoizedProps && fiber.memoizedProps.testID === testID && checkFiberActive(fiber)) {
           found = fiber;
         }
       });
@@ -103,6 +121,7 @@
         if (typeof al !== 'string') return;
         var match = exact === false ? al.includes(label) : al === label;
         if (!match) return;
+        if (!checkFiberActive(fiber)) return;
         var nodeId = register(fiber);
         var typeName = typeof fiber.type === 'string'
           ? fiber.type
@@ -128,6 +147,7 @@
             if (!fiber.memoizedProps || fiber.memoizedProps[keys[k]] !== props[keys[k]]) return;
           }
         }
+        if (!checkFiberActive(fiber)) return;
         var nodeId = register(fiber);
         results.push({ nodeId: nodeId, componentType: name });
       });
@@ -169,6 +189,12 @@
     while (current) {
       if (current.memoizedProps && typeof current.memoizedProps.onChangeText === 'function') {
         try { current.memoizedProps.onChangeText(text); return true; } catch (e) { return false; }
+      }
+      // Fallback for component libraries that use onChange with a native event shape
+      if (current.memoizedProps && typeof current.memoizedProps.onChange === 'function') {
+        try { current.memoizedProps.onChange({ nativeEvent: { text: text } }); return true; } catch (e1) {}
+        try { current.memoizedProps.onChange(text); return true; } catch (e2) {}
+        // Both failed — continue up the fiber tree
       }
       current = current.return;
     }
@@ -379,7 +405,10 @@
     if (!onPress) return false;
     try {
       onPress({ nativeEvent: {} });
-      return true;
+      // Return a resolved Promise so the CDP awaitPromise round-trip lets
+      // React flush its microtask queue (navigation state updates, etc.)
+      // before the eval result is returned to the test runner.
+      return Promise.resolve(true);
     } catch (e) {
       return false;
     }
@@ -445,10 +474,17 @@
   }
 
   // Depth-limited tree serialization for debugging (never walk return links).
-  function getTree(maxDepth) {
+  function getTree(maxDepth, activeOnly) {
     maxDepth = maxDepth || 30;
     function serialize(fiber, depth) {
       if (!fiber || depth > maxDepth) return null;
+      if (activeOnly) {
+        var p = fiber.memoizedProps;
+        if (p) {
+          if (p.activityState != null && p.activityState < 2) return null;
+          if (p.style && !Array.isArray(p.style) && p.style.display === 'none') return null;
+        }
+      }
       var name = typeof fiber.type === 'string'
         ? fiber.type
         : (fiber.type && (fiber.type.displayName || fiber.type.name)) || null;
@@ -651,6 +687,7 @@
         if (!p || p.accessibilityRole !== role) return;
         // Skip inner HOC wrappers that receive the same prop passthrough.
         if (fiber.return && fiber.return.memoizedProps && fiber.return.memoizedProps.accessibilityRole === role) return;
+        if (!checkFiberActive(fiber)) return;
         results.push({ nodeId: register(fiber), componentType: getTypeName(fiber) });
       });
     }
@@ -682,6 +719,7 @@
         if (!match) return;
         // Skip inner HOC wrappers that pass the same placeholder through.
         if (fiber.return && fiber.return.memoizedProps && fiber.return.memoizedProps.placeholder === p.placeholder) return;
+        if (!checkFiberActive(fiber)) return;
         results.push({ nodeId: register(fiber), componentType: getTypeName(fiber) });
       });
     }
@@ -949,6 +987,12 @@
     return false;
   }
 
+  function isElementActive(nodeId) {
+    var fiber = getCurrentFiber(nodeId);
+    if (!fiber) return false;
+    return checkFiberActive(fiber);
+  }
+
   globalThis.__testBridge__ = {
     findByTestID: findByTestID,
     findByComponent: findByComponent,
@@ -993,7 +1037,17 @@
     getNextSibling: getNextSibling,
     getPreviousSibling: getPreviousSibling,
     closest: closest,
+    isElementActive: isElementActive,
   };
+
+  // Hook into React commits so the test runner can use commit-based waitForElement
+  if (typeof globalThis.stowawayNotify === 'function') {
+    var __origCommit = hook.onCommitFiberRoot;
+    hook.onCommitFiberRoot = function(rendererId, root) {
+      if (__origCommit) __origCommit.apply(this, arguments);
+      try { globalThis.stowawayNotify('commit'); } catch(e) {}
+    };
+  }
 
   return true;
 })()
