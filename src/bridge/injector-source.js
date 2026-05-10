@@ -81,7 +81,10 @@
     while (current) {
       var p = current.memoizedProps;
       if (p) {
-        if (p.activityState != null && p.activityState < 2) return false;
+        // react-native-screens: only reject when explicitly inactive (0).
+        // State 1 = transitioning or below top — still rendered, don't reject.
+        // Non-numeric values (e.g. Animated.Value) are skipped — we can't read them from JS.
+        if (typeof p.activityState === 'number' && p.activityState === 0) return false;
         var style = p.style;
         if (style && !Array.isArray(style) && style.display === 'none') return false;
       }
@@ -481,7 +484,7 @@
       if (activeOnly) {
         var p = fiber.memoizedProps;
         if (p) {
-          if (p.activityState != null && p.activityState < 2) return null;
+          if (typeof p.activityState === 'number' && p.activityState === 0) return null;
           if (p.style && !Array.isArray(p.style) && p.style.display === 'none') return null;
         }
       }

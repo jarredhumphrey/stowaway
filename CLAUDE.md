@@ -76,7 +76,7 @@ Key methods on `AppSession`:
 
 | Method | Behaviour |
 |--------|-----------|
-| `find(selector)` | First visible match; throws if none. Filters out fibers under `activityState < 2` (inactive react-native-screens) or `style.display === 'none'`. |
+| `find(selector)` | First visible match; throws if none. Filters out fibers under `activityState === 0` (fully inactive react-native-screens) or `style.display === 'none'`. State 1 (transitioning/below-top) and Animated values are not rejected. |
 | `findAll(selector)` | All visible matches; empty array if none. Same visibility filter as `find`. |
 | `findNth(selector, n)` | Returns the nth (0-based) match from `findAll`; throws if out of range |
 | `waitForElement(selector \| testID, opts?)` | Resolves on the first React commit containing a visible match (uses `Runtime.addBinding` + `onCommitFiberRoot`); polling fallback at `interval`. String argument treated as `{ testID }`. |
@@ -248,7 +248,7 @@ The IIFE installs `globalThis.__testBridge__` with these methods. Extend `inject
 | `selectOption(nodeId, value)` | `boolean` — calls `onValueChange(value)` on nearest ancestor |
 | `dismissKeyboard()` | `boolean` |
 | `getTree(maxDepth?, activeOnly?)` | serialized tree — useful for debugging testIDs. Pass `activeOnly=true` to prune inactive screen subtrees and `display:none` nodes |
-| `isElementActive(nodeId)` | `boolean` — walks `fiber.return` checking `activityState >= 2` and not `display:none`. Used internally by `find`/`findAll`/`waitForElement` to filter visibility |
+| `isElementActive(nodeId)` | `boolean` — walks `fiber.return` rejecting fibers with numeric `activityState === 0` or `style.display === 'none'`. Used internally by `find`/`findAll`/`waitForElement` to filter visibility |
 | `getParent(nodeId)` | `NodeDescriptor \| null` — nearest meaningful ancestor (skips HOC wrappers, Context, Fragments) |
 | `getSiblings(nodeId)` | `NodeDescriptor[]` — all fiber siblings excluding the node itself |
 | `getNextSibling(nodeId)` | `NodeDescriptor \| null` — immediately following sibling in fiber order |
