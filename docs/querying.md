@@ -168,7 +168,7 @@ Same options as `waitForElement`.
 
 ## `scrollAndFind(testID, opts?)`
 
-Scrolls the first visible `FlatList` or `ScrollView` in 5 000 px increments, pausing after each step to poll for the element. Returns the element when found; throws on timeout.
+Scrolls a scrollable in 5 000 px increments, pausing after each step to poll for the element. Returns the element when found; throws on timeout.
 
 ```ts
 // Element is far down a long list — scroll until it appears
@@ -178,11 +178,23 @@ await item.tap();
 
 If the element is already visible before any scroll, `scrollAndFind` returns it immediately without scrolling.
 
-Option:
+When no `within` is given, the scrollable is chosen by heuristic, in this order:
+
+1. Vertical `FlatList` / `VirtualizedList`
+2. Vertical `ScrollView`
+3. Horizontal `FlatList` / `VirtualizedList` (fallback)
+4. Horizontal `ScrollView` (fallback — scrolled along the `x` axis)
+
+This means the common multi-scrollable case (a horizontal pill nav above a vertical list) targets the vertical list correctly, while horizontal-only screens still scroll via the horizontal fallback. When the heuristics can't decide — e.g. two vertical `FlatList`s on one screen — pin the container explicitly with `within`.
+
+On timeout the error identifies which kind of scrollable was scrolled (`a vertical FlatList`, `a horizontal ScrollView`, the `within` element, etc.), or reports `no scrollable component found in the tree`.
+
+Options:
 
 | Option | Default | Description |
 |---|---|---|
 | `timeout` | `config.defaultTimeout` | Max total wait in ms |
+| `within` | — | A `testID` string or `Selector` pinning the scroll container. Use when the heuristic would pick the wrong scrollable. Throws if the selector matches nothing. |
 
 ---
 

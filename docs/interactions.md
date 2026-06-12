@@ -210,11 +210,14 @@ const card = await app.waitForElement('card-10');
 
 ### `app.scrollAndFind(testID, opts?)`
 
-Scrolls the first visible list or scroll view in 5 000 px steps until the element with the given `testID` appears. Covers the common case where the element is in a long list and you don't know the exact offset.
+Scrolls in 5 000 px steps until the element with the given `testID` appears. Covers the common case where the element is in a long list and you don't know the exact offset. The scrollable is picked by heuristic (vertical lists first, then horizontal as a fallback); pass `within` to pin a specific container when the heuristic would pick the wrong one. See [`scrollAndFind`](./querying.md#scrollandfindtestid-opts) in Querying for the full resolution order and options.
 
 ```ts
 const item = await app.scrollAndFind('product-item-99', { timeout: 15_000 });
 await item.tap();
+
+// Pin the scroll container when there are multiple vertical scrollables
+const row = await app.scrollAndFind('row-42', { within: 'results-list' });
 ```
 
 ---

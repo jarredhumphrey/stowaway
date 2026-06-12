@@ -6,3 +6,6 @@ src/bridge/injector-script.ts
 src/bridge/clock-script.ts
 src/bridge/network-mock-script.ts
 src/bridge/storage-script.ts
+
+# Local scratch file — fed manually to the consuming project, not part of this repo
+CHANGELOG.md

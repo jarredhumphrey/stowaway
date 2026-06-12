@@ -72,6 +72,8 @@ All configuration comes from environment variables, read once at startup via `lo
 | `VERBOSE` | — | `1` or `true` — prints each test step as it completes; also enabled by `--verbose` CLI flag |
 | `SLOW_REPLAY` | — | `1` or `true` — adds a delay between trace steps when generating the failure replay video |
 | `SLOW_REPLAY_DELAY` | `800` | Delay in ms between steps when `SLOW_REPLAY` is enabled |
+| `SLOW` | — | `1` or `true` — enables slow mode for the whole run, adding a delay between every Element interaction (taps, typing, etc.). Useful for demo recordings; doesn't affect `waitForElement` |
+| `SLOW_DELAY` | `800` | Delay in ms between Element interactions when `SLOW` is enabled |
 
 ## Writing your first spec
 
