@@ -17,9 +17,11 @@ export class TraceCollector {
 
   // Pre-insert a placeholder slot (used by step() so children appear after the header).
   // Returns the index for later update().
+  // Defaults to `failed: true` so that if the step hangs and update() never runs,
+  // the entry stays marked failed in the trace (correct attribution on timeout).
   reserve(step: Omit<TraceStep, 'durationMs' | 'screenshotPath'>): number {
     const idx = this._steps.length;
-    this._steps.push({ ...step, depth: this._depth, durationMs: 0 });
+    this._steps.push({ ...step, depth: this._depth, durationMs: 0, failed: true });
     return idx;
   }
 

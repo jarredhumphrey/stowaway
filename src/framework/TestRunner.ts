@@ -222,6 +222,7 @@ export class TestRunner {
 
           clearSoftFailures();
           session.enableTracing();
+          if (this.config.slowMode) session.enableSlowMode(this.config.slowModeDelay);
           try {
             await runWithRetry(test.fn, session, timeoutMs, retries);
             flushSoftFailures();
@@ -237,9 +238,6 @@ export class TestRunner {
             } catch { /* non-fatal — screenshot is best-effort */ }
           } finally {
             traceSteps = session.getTrace();
-            if (status === 'fail' && traceSteps.length > 0 && !traceSteps.some(s => s.failed)) {
-              traceSteps[traceSteps.length - 1].failed = true;
-            }
             session.disableTracing();
           }
 
@@ -262,9 +260,6 @@ export class TestRunner {
               } catch {}
               replayVideoPath = await session.stopRecording();
               traceSteps = session.getTrace();
-              if (traceSteps.length > 0 && !traceSteps.some(s => s.failed)) {
-                traceSteps[traceSteps.length - 1].failed = true;
-              }
             } catch (replayErr) {
               const replayMsg = replayErr instanceof Error ? replayErr.message : String(replayErr);
               console.log(`      ${dim('slow replay failed: ' + replayMsg)}`);

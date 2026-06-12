@@ -9,6 +9,8 @@ export interface E2EConfig {
   verbose: boolean;
   slowReplay: boolean;
   slowReplayDelay: number;
+  slowMode: boolean;
+  slowModeDelay: number;
 }
 
 export function loadConfig(): E2EConfig {
@@ -34,6 +36,9 @@ export function loadConfig(): E2EConfig {
   const slowReplay =
     process.env.SLOW_REPLAY === '1' || process.env.SLOW_REPLAY === 'true';
 
+  const slowMode =
+    process.env.SLOW === '1' || process.env.SLOW === 'true';
+
   return {
     platform,
     metroPort: Number(process.env.METRO_PORT ?? 8081),
@@ -45,5 +50,7 @@ export function loadConfig(): E2EConfig {
     verbose,
     slowReplay,
     slowReplayDelay: Number(process.env.SLOW_REPLAY_DELAY ?? 800),
+    slowMode,
+    slowModeDelay: Number(process.env.SLOW_DELAY ?? 800),
   };
 }

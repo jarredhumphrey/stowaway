@@ -430,50 +430,90 @@
 
   // Scroll a FlatList/ScrollView to the given y-offset.
   // Tries multiple strategies since VirtualizedList may be a class or function component.
+  // Global scroll. Prefers vertical scrollables (FlatList/VirtualizedList, then
+  // plain ScrollView) so a horizontal pill nav above a vertical list doesn't
+  // intercept the call. Falls back to horizontal scrollables when no vertical
+  // ones are present, preserving the pre-0.2.2 behaviour for horizontal-only
+  // screens.
+  // Returns 'flatlist' | 'scrollview' | 'flatlist-horizontal' | 'scrollview-horizontal' | 'none'.
   function scrollToOffset(offset) {
     var roots = getRoots();
 
-    function tryScroll(fiber) {
-      var name = typeof fiber.type === 'string'
+    function isHorizontal(fiber) {
+      return fiber.memoizedProps && fiber.memoizedProps.horizontal === true;
+    }
+
+    function typeNameOf(fiber) {
+      return typeof fiber.type === 'string'
         ? fiber.type
         : (fiber.type && (fiber.type.displayName || fiber.type.name)) || '';
+    }
 
-      // Strategy 1: VirtualizedList/FlatList class instance on stateNode
-      if ((name === 'VirtualizedList' || name === 'FlatList') && fiber.stateNode) {
-        var inst = fiber.stateNode;
-        if (typeof inst.scrollToOffset === 'function') {
-          inst.scrollToOffset({ offset: offset, animated: false });
-          return true;
-        }
-        if (typeof inst.scrollToEnd === 'function') {
-          inst.scrollToEnd({ animated: false });
-          return true;
-        }
+    function scrollList(fiber) {
+      if (!fiber.stateNode) return false;
+      var inst = fiber.stateNode;
+      if (typeof inst.scrollToOffset === 'function') {
+        inst.scrollToOffset({ offset: offset, animated: false });
+        return true;
       }
-
-      // Strategy 2: ScrollView ref or stateNode
-      if (name === 'ScrollView') {
-        if (fiber.ref && typeof fiber.ref.scrollTo === 'function') {
-          fiber.ref.scrollTo({ y: offset, animated: false });
-          return true;
-        }
-        if (fiber.stateNode && typeof fiber.stateNode.scrollTo === 'function') {
-          fiber.stateNode.scrollTo({ y: offset, animated: false });
-          return true;
-        }
+      if (typeof inst.scrollToEnd === 'function') {
+        inst.scrollToEnd({ animated: false });
+        return true;
       }
-
       return false;
     }
 
-    for (var i = 0; i < roots.length; i++) {
-      var done = false;
-      walk(roots[i], function (f) {
-        if (!done) done = tryScroll(f);
-      });
-      if (done) return true;
+    function scrollView(fiber, axis) {
+      var arg = axis === 'x' ? { x: offset, animated: false } : { y: offset, animated: false };
+      if (fiber.ref && typeof fiber.ref.scrollTo === 'function') {
+        fiber.ref.scrollTo(arg);
+        return true;
+      }
+      if (fiber.stateNode && typeof fiber.stateNode.scrollTo === 'function') {
+        fiber.stateNode.scrollTo(arg);
+        return true;
+      }
+      return false;
     }
-    return false;
+
+    function findFirst(predicate) {
+      for (var i = 0; i < roots.length; i++) {
+        var match = null;
+        walk(roots[i], function (f) {
+          if (!match && predicate(f)) match = f;
+        });
+        if (match) return match;
+      }
+      return null;
+    }
+
+    // Pass 1: vertical FlatList/VirtualizedList
+    var verticalList = findFirst(function (f) {
+      var n = typeNameOf(f);
+      return (n === 'VirtualizedList' || n === 'FlatList') && !isHorizontal(f);
+    });
+    if (verticalList && scrollList(verticalList)) return 'flatlist';
+
+    // Pass 2: vertical ScrollView
+    var verticalScroll = findFirst(function (f) {
+      return typeNameOf(f) === 'ScrollView' && !isHorizontal(f);
+    });
+    if (verticalScroll && scrollView(verticalScroll, 'y')) return 'scrollview';
+
+    // Pass 3 (fallback): horizontal FlatList/VirtualizedList — scrollToOffset is axis-agnostic
+    var horizontalList = findFirst(function (f) {
+      var n = typeNameOf(f);
+      return (n === 'VirtualizedList' || n === 'FlatList') && isHorizontal(f);
+    });
+    if (horizontalList && scrollList(horizontalList)) return 'flatlist-horizontal';
+
+    // Pass 4 (fallback): horizontal ScrollView — uses x axis
+    var horizontalScroll = findFirst(function (f) {
+      return typeNameOf(f) === 'ScrollView' && isHorizontal(f);
+    });
+    if (horizontalScroll && scrollView(horizontalScroll, 'x')) return 'scrollview-horizontal';
+
+    return 'none';
   }
 
   // Depth-limited tree serialization for debugging (never walk return links).

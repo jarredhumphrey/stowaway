@@ -508,7 +508,10 @@ export class AppSession {
     throw new Error(`waitFor() condition timed out after ${timeout}ms`);
   }
 
-  async scrollAndFind(testID: string, opts?: { timeout?: number }): Promise<Element> {
+  async scrollAndFind(
+    testID: string,
+    opts?: { timeout?: number; within?: string | Selector },
+  ): Promise<Element> {
     const start = Date.now();
     const timeout = opts?.timeout ?? this.config.defaultTimeout;
     const deadline = Date.now() + timeout;
@@ -526,11 +529,34 @@ export class AppSession {
       return initial;
     }
 
+    // Resolve the scroll target once. With `within`, pin to that fiber's nodeId
+    // (Element-style scroll); otherwise use the global heuristic scroll.
+    let scrollContainerNodeId: number | null = null;
+    if (opts?.within !== undefined) {
+      const selector: Selector = typeof opts.within === 'string' ? { testID: opts.within } : opts.within;
+      const containerDesc = await this.hermes.evaluate<NodeDescriptor | null>(selectorToExpression(selector));
+      if (!containerDesc) {
+        throw new Error(`scrollAndFind("${testID}"): within selector ${JSON.stringify(opts.within)} not found`);
+      }
+      scrollContainerNodeId = containerDesc.nodeId;
+    }
+
     const SCROLL_STEP = 5_000;
     let scrollOffset = SCROLL_STEP;
+    type ScrollResult = 'flatlist' | 'scrollview' | 'flatlist-horizontal' | 'scrollview-horizontal' | 'none' | 'within';
+    let lastScrollResult: ScrollResult = 'none';
 
     while (Date.now() < deadline) {
-      await this.hermes.evaluate<boolean>(`__testBridge__.scrollToOffset(${scrollOffset})`);
+      if (scrollContainerNodeId !== null) {
+        const ok = await this.hermes.evaluate<boolean>(
+          `__testBridge__.scrollElement(${scrollContainerNodeId}, ${scrollOffset})`,
+        );
+        lastScrollResult = ok ? 'within' : 'none';
+      } else {
+        lastScrollResult = await this.hermes.evaluate<ScrollResult>(
+          `__testBridge__.scrollToOffset(${scrollOffset})`,
+        );
+      }
 
       const pollDeadline = Math.min(Date.now() + 1_500, deadline);
       while (Date.now() < pollDeadline) {
@@ -545,7 +571,21 @@ export class AppSession {
 
       scrollOffset += SCROLL_STEP;
     }
-    throw new Error(`scrollAndFind("${testID}") timed out after ${timeout}ms`);
+
+    const labels: Record<ScrollResult, string> = {
+      'flatlist': 'a vertical FlatList',
+      'scrollview': 'a vertical ScrollView',
+      'flatlist-horizontal': 'a horizontal FlatList',
+      'scrollview-horizontal': 'a horizontal ScrollView',
+      'within': 'the within element',
+      'none': '',
+    };
+    const reason = lastScrollResult === 'none'
+      ? (scrollContainerNodeId !== null
+          ? ' — the within element is not a recognised scrollable (FlatList/VirtualizedList/ScrollView)'
+          : ' — no scrollable component found in the tree')
+      : ` — scrolled ${labels[lastScrollResult]} but "${testID}" never appeared`;
+    throw new Error(`scrollAndFind("${testID}") timed out after ${timeout}ms${reason}`);
   }
 
   async waitForElementToDisappear(
